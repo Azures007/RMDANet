@@ -54,6 +54,10 @@ def get_args(options):
         args.cnt_classwise = False
     if options.no_independent_target_probe:
         args.ssf_independent_target_probe = False
+    if options.no_independent_target_reweight:
+        # v6-compatible behavior: do not downweight brittle target pseudo labels.
+        args.independent_target_reweight = False
+        args.ssf_independent_target_probe = False
     if options.dual_head_filter:
         args.dual_head_filter = True
         args.lambda_dual_source = options.dual_source_weight
@@ -87,6 +91,7 @@ def main():
     p.add_argument('--no-alignment-gate',action='store_true')
     p.add_argument('--no-classwise-cnt',action='store_true')
     p.add_argument('--no-independent-target-probe',action='store_true')
+    p.add_argument('--no-independent-target-reweight',action='store_true')
     p.add_argument('--dual-head-filter',action='store_true')
     p.add_argument('--dual-source-weight',type=float,default=0.10)
     p.add_argument('--dry-run',action='store_true')
