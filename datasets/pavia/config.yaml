@@ -1,0 +1,42 @@
+# Pavia: PaviaU -> PaviaC
+# 3-seed mean: 85.13 ± 1.20 (seed 1236/1237/1238)
+dataset:
+  source_name: paviaU
+  target_name: paviaC
+  num_classes: 7
+
+training:
+  patch_size: 7
+  batch_size: 128
+  eval_batch_size: 256
+  epochs: 110
+  lr: 0.001
+  source_train_ratio: 0.1
+  source_sampler_power: 1.0
+  source_samples_per_class: 0
+  target_train_max_samples: 30000
+  band_alignment_strength: 0.1
+  ema_decay: 0.996
+  num_workers: 8
+  amp: true
+
+uda:
+  ablation_id: full
+  pseudo_start_epoch: 50
+  pseudo_confidence: 0.95
+  pseudo_warm_epochs: 30
+  target_gt_mix_ratio: 0.0
+  use_gt_target_mask: false
+  lambda_cca: 0.5
+  cca_start_epoch: 0
+  cca_temperature: 0.10
+  prat_style_max: 0.2
+  strict_class_balance_strength: 1.0
+  prototype_align_flag: true
+  prototype_weight: 0.03
+  prototype_confidence: 0.95
+  prototype_temperature: 0.08
+  include_target_scale_mi: true
+  memory_update_start_epoch: 1
+  cempa_min_age: 2
+  cempa_min_streak: 2

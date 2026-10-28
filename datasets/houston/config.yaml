@@ -1,0 +1,53 @@
+# Houston: Houston13 -> Houston18
+# 3-seed mean: 78.56 ± 1.28
+# seed 1233: 77.13 | seed 1237: 78.31 | seed 1238: 80.24
+dataset:
+  source_name: Houston13
+  target_name: Houston18
+  num_classes: 7
+
+training:
+  patch_size: 17
+  batch_size: 96
+  eval_batch_size: 192
+  epochs: 280
+  lr: 0.0003
+  weight_decay: 0.0004
+  grad_clip: 5.0
+  source_train_ratio: 0.20
+  target_train_max_samples: 50000
+  band_alignment_strength: 0.45
+  ema_decay: 0.996
+  label_smoothing: 0.035
+  num_workers: 8
+  amp: true
+
+uda:
+  ablation_id: full
+
+  pseudo_start_epoch: 100
+  target_gt_mix_ratio: 0.0
+  use_gt_target_mask: false
+  pseudo_warm_epochs: 80
+  pseudo_confidence: 0.90
+  reliability_threshold: 0.48
+  cempa_class_cap: 40
+  cempa_min_age: 3
+  cempa_min_streak: 3
+
+  prat_style_max: 0.64
+  prat_warm_epochs: 55
+
+  # 与 Pavia 统一：CCA + 原型对齐打开
+  lambda_cca: 0.5
+  cca_start_epoch: 0
+  cca_temperature: 0.10
+  prototype_align_flag: true
+  prototype_weight: 0.03
+  prototype_confidence: 0.95
+  prototype_temperature: 0.08
+
+  # 仍保留差异（待批 1 实验统一）
+  strict_class_balance_strength: 0.0
+  include_target_scale_mi: false
+  memory_update_start_epoch: 100
