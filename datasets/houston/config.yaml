@@ -10,7 +10,7 @@ dataset:
 
 training:
   patch_size: 7
-  batch_size: 32
+  batch_size: 128
   eval_batch_size: 512
   eval_interval: 5
   epochs: 50
