@@ -26,6 +26,10 @@ training:
   source_sampler_power: 1.0
   source_class_weight_power: 0.0
   target_train_max_samples: 100000
+  # literature protocol: unlabeled pool = labeled target pixels (labels never enter a loss)
+  target_pool_from_gt: true
+  # the official MSDA recipe does not augment source patches
+  source_augment: false
   band_alignment_strength: 0.0
   num_workers: 4
   amp: false
