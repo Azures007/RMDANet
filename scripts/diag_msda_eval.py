@@ -16,6 +16,13 @@ import torch
 import torch.nn.functional as F
 
 
+def _unpack(output):
+    """Official ResClassifier returns logits directly in eval mode."""
+    if isinstance(output, (tuple, list)):
+        return output[0]
+    return output
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -63,9 +70,13 @@ def main() -> None:
     with torch.no_grad():
         for x, y in loader:
             x = x.to(device)
-            features = backbone(x)
-            logits1 = f1(features)[0]
-            logits2 = f2(features)[0]
+            features = _unpack(backbone(x))
+            logits1 = _unpack(f1(features))
+            logits2 = _unpack(f2(features))
+            if logits1.dim() == 1:
+                logits1 = logits1.unsqueeze(0)
+            if logits2.dim() == 1:
+                logits2 = logits2.unsqueeze(0)
             preds1.append(logits1.argmax(dim=1).cpu().numpy())
             preds2.append(logits2.argmax(dim=1).cpu().numpy())
             preds_ens.append(((logits1 + logits2) / 2).argmax(dim=1).cpu().numpy())
