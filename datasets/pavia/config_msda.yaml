@@ -1,4 +1,4 @@
-# Pavia: PaviaU -> PaviaC (MSDA official recipe, faithful port)
+﻿# Pavia: PaviaU -> PaviaC (MSDA official recipe, faithful port)
 dataset:
   source_name: paviaU
   target_name: paviaC
@@ -16,16 +16,16 @@ training:
   grad_clip: 5.0
   optimizer_type: sgd
   constant_lr: true
-  input_normalization: band
+  input_normalization: scale
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
   source_train_ratio: 0.38
   strict_source_budget: true
-  steps_per_epoch: 40
+  steps_per_epoch: 39
   min_steps_per_epoch: 5
   source_sampler_power: 1.0
   source_class_weight_power: 0.0
-  target_train_max_samples: 30000
+  target_train_max_samples: 100000
   band_alignment_strength: 0.0
   num_workers: 4
   amp: false
