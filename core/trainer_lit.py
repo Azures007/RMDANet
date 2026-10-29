@@ -16,6 +16,7 @@ The original v7.1 pipeline stays untouched on the ``main`` branch.
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 
@@ -151,6 +152,18 @@ def train(args) -> dict:
         )
     scaler = make_grad_scaler(bool(args.amp) and device.type == "cuda")
 
+    def apply_learning_rate(epoch: int) -> float:
+        """Constant lr (literature) or cosine decay when --no-constant-lr."""
+        if bool(getattr(args, "constant_lr", True)):
+            return float(args.lr)
+        total = max(1, int(args.epochs))
+        progress = min(1.0, max(0.0, (epoch - 1) / total))
+        lr = 1e-4 + 0.5 * (float(args.lr) - 1e-4) * (1.0 + math.cos(math.pi * progress))
+        for optimizer in (optimizer_g, optimizer_c):
+            for group in optimizer.param_groups:
+                group["lr"] = lr
+        return lr
+
     source_loader = loaders["source_loader"]
     target_loader = loaders["target_loader"]
     class_weights = loaders["class_weights"]
@@ -160,6 +173,7 @@ def train(args) -> dict:
     target_iterator = iter(target_loader)
     start_time = time.time()
     for epoch in range(1, int(args.epochs) + 1):
+        current_lr = apply_learning_rate(epoch)
         backbone.train()
         f1.train()
         f2.train()
@@ -316,7 +330,8 @@ def train(args) -> dict:
                 f"sup={totals['supcon']/count:.4f} tsup={totals['tsupcon']/count:.4f} "
                 f"sel={totals['sel']/count:.1f} src_acc={100.0*totals['acc']/count:.2f} "
                 f"tau={tau:.3f} eta={eta:.3f} wp={pseudo_weight:.3f} "
-                f"wts={target_supcon_weight:.3f} steps={steps_per_epoch} time={elapsed:.1f}m"
+                f"wts={target_supcon_weight:.3f} lr={current_lr:.4f} "
+                f"steps={steps_per_epoch} time={elapsed:.1f}m"
             )
 
     checkpoint_path = run_dir / "selected_model.pt"
