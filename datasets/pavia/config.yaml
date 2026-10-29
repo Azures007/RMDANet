@@ -17,10 +17,10 @@ training:
   weight_decay: 0.0004
   grad_clip: 5.0
   # literature-aligned source budget: 180 labeled samples per class, all for training
-  source_samples_per_class: 0
+  source_samples_per_class: 180
   source_budget_train_fraction: 1.0
   # kept for the ratio-based fallback path (ignored when samples_per_class > 0)
-  source_train_ratio: 0.20
+  source_train_ratio: 0.38
   steps_per_epoch: 40
   source_sampler_power: 1.0
   target_train_max_samples: 30000
