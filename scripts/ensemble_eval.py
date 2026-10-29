@@ -109,24 +109,36 @@ def _lit_model(checkpoint: dict, data_path: str, device: torch.device):
 
 
 @torch.no_grad()
-def _reliability_probabilities(model, loader, device):
+def _reliability_probabilities(model, loader, device, tta: bool = False):
     probabilities, labels = [], []
     for x, y in loader:
         x = x.to(device, non_blocking=True)
-        logits = model(x).logits
-        probabilities.append(F.softmax(logits.float(), dim=1).cpu().numpy())
+        if tta:
+            views = (x, torch.flip(x, (-1,)), torch.flip(x, (-2,)), torch.flip(x, (-2, -1)))
+            probs = torch.stack(
+                [F.softmax(model(view).logits.float(), dim=1) for view in views], dim=0
+            ).mean(dim=0)
+        else:
+            probs = F.softmax(model(x).logits.float(), dim=1)
+        probabilities.append(probs.cpu().numpy())
         labels.append(y.numpy())
     return np.concatenate(probabilities), np.concatenate(labels)
 
 
 @torch.no_grad()
-def _lit_probabilities(backbone, f1, f2, loader, device):
+def _lit_probabilities(backbone, f1, f2, loader, device, tta: bool = False):
     probabilities, labels = [], []
     for x, y in loader:
         x = x.to(device, non_blocking=True)
-        features = backbone(x)
-        logits = 0.5 * (f1(features) + f2(features))
-        probabilities.append(F.softmax(logits.float(), dim=1).cpu().numpy())
+        views = (x,) if not tta else (
+            x, torch.flip(x, (-1,)), torch.flip(x, (-2,)), torch.flip(x, (-2, -1))
+        )
+        probs = []
+        for view in views:
+            features = backbone(view)
+            logits = 0.5 * (f1(features) + f2(features))
+            probs.append(F.softmax(logits.float(), dim=1))
+        probabilities.append(torch.stack(probs, dim=0).mean(dim=0).cpu().numpy())
         labels.append(y.numpy())
     return np.concatenate(probabilities), np.concatenate(labels)
 
@@ -143,6 +155,8 @@ def main() -> None:
     parser.add_argument("--data-path", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--weight-a", type=float, default=0.5)
+    parser.add_argument("--sweep", action="store_true", help="report a weight sensitivity sweep")
+    parser.add_argument("--tta", action="store_true", help="flip TTA on both models")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--confirm-final-eval", action="store_true")
     options = parser.parse_args()
@@ -166,8 +180,8 @@ def main() -> None:
     print("[ENSEMBLE] Loading TARGET GT NOW for reporting ONLY")
     loader_a = build_target_evaluation_loader(args_a, aligned_a)
     loader_b = build_target_evaluation_loader(args_b, aligned_b)
-    probs_a, labels_a = _reliability_probabilities(model_a, loader_a, device)
-    probs_b, labels_b = _lit_probabilities(backbone_b, f1_b, f2_b, loader_b, device)
+    probs_a, labels_a = _reliability_probabilities(model_a, loader_a, device, tta=options.tta)
+    probs_b, labels_b = _lit_probabilities(backbone_b, f1_b, f2_b, loader_b, device, tta=options.tta)
     if probs_a.shape[0] != probs_b.shape[0] or not np.array_equal(labels_a, labels_b):
         raise RuntimeError(
             "The two preprocessing pipelines produced different target sample sets."
@@ -188,6 +202,15 @@ def main() -> None:
         f"Kappa={metrics_ensemble['Kappa']:.4f}"
     )
     print("[ENSEMBLE] per-class:", metrics_ensemble["class_accuracy"])
+
+    sweep_rows = []
+    if options.sweep:
+        print("[ENSEMBLE] weight sensitivity (A weight -> OA / AA), for analysis only:")
+        for weight in (0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70):
+            probs = weight * probs_a + (1.0 - weight) * probs_b
+            candidate = _metrics(labels_a, probs, num_classes)
+            sweep_rows.append({"weight_a": weight, "OA": candidate["OA"], "AA": candidate["AA"]})
+            print(f"  {weight:.2f} -> OA={candidate['OA']:.2f} AA={candidate['AA']:.2f}")
 
     payload = {
         "checkpoint_a": options.checkpoint_a,
