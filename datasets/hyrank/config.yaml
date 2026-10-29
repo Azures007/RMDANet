@@ -1,7 +1,7 @@
-﻿# HyRANK: Dioni -> Loukia
+# HyRANK: Dioni -> Loukia
 # Literature-aligned protocol (v3.0): 180 labeled source samples per class,
 # no source validation split, 50 epochs x 40 steps, final epoch reported.
-# SGD/momentum 0.9 with constant lr and batch 32 follow the HSI-UDA literature;
+# AdamW/cosine, batch size and extra modules are intentionally kept from v7.1.
 dataset:
   source_name: Dioni
   target_name: Loukia
@@ -16,9 +16,6 @@ training:
   lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
-  # AdamW + cosine lr (SGD lr 0.1 diverged for this multi-loss model)
-  optimizer_type: adamw
-  constant_lr: false
   # literature-aligned source budget: 180 labeled samples per class, all for training
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
@@ -27,8 +24,6 @@ training:
   steps_per_epoch: 40
   source_sampler_power: 1.0
   target_train_max_samples: 15000
-  # scene-median scaling keeps relative brightness with unchanged spectral shape (plan A v3)
-  input_normalization: median
   band_alignment_strength: 0.1
   ema_decay: 0.996
   label_smoothing: 0.035
@@ -38,8 +33,6 @@ training:
 uda:
   ablation_id: full
   align_maturity_gate: false
-  # scheme A: per-pixel log-magnitude input channel (spectral shape kept)
-  amplitude_input: false
   independent_target_reweight: false
   # no source validation -> report the final epoch (literature-aligned)
   select_final_epoch: true
