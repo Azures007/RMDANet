@@ -147,3 +147,35 @@ def batch_nuclear_norm(probabilities: torch.Tensor) -> torch.Tensor:
 def discrepancy_l1(probabilities_a: torch.Tensor, probabilities_b: torch.Tensor) -> torch.Tensor:
     """L1 discrepancy between the two classifier predictions (MCD style)."""
     return torch.mean(torch.abs(probabilities_a - probabilities_b))
+
+
+class SupConLoss(nn.Module):
+    """Supervised contrastive loss (Khosla et al., NeurIPS 2020).
+
+    Inputs: features [B, D] (L2-normalised internally) and labels [B].
+    """
+
+    def __init__(self, temperature: float = 0.1) -> None:
+        super().__init__()
+        self.temperature = float(temperature)
+
+    def forward(self, features: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        features = F.normalize(features.float(), dim=1)
+        batch = features.size(0)
+        if batch < 2:
+            return features.new_zeros(())
+        similarity = features @ features.t() / self.temperature
+        similarity = similarity - similarity.max(dim=1, keepdim=True).values.detach()
+        labels = labels.view(-1, 1)
+        positive = labels.eq(labels.t()).float()
+        eye = torch.eye(batch, device=features.device)
+        positive = positive - eye
+        positive_count = positive.sum(dim=1)
+        valid = positive_count > 0
+        if not bool(valid.any()):
+            return features.new_zeros(())
+        exp_similarity = torch.exp(similarity) * (1.0 - eye)
+        log_prob = similarity - torch.log(exp_similarity.sum(dim=1, keepdim=True).clamp_min(1e-12))
+        mean_log_prob_pos = (positive * log_prob).sum(dim=1) / positive_count.clamp_min(1.0)
+        return -mean_log_prob_pos[valid].mean()
+

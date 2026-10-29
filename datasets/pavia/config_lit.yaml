@@ -1,11 +1,11 @@
-# Pavia: PaviaU -> PaviaC (lit-recipe: TAPDA/MSDA-style training)
+﻿# Pavia: PaviaU -> PaviaC (lit-recipe: TAPDA/MSDA-style training)
 dataset:
   source_name: paviaU
   target_name: paviaC
   num_classes: 7
 
 training:
-  patch_size: 7
+  patch_size: 9
   batch_size: 32
   eval_batch_size: 256
   eval_interval: 10
@@ -28,7 +28,7 @@ training:
   source_sampler_power: 1.0
   source_class_weight_power: 0.0
   target_train_max_samples: 30000
-  band_alignment_strength: 0.1
+  band_alignment_strength: 0.0
   num_workers: 4
   amp: true
   label_smoothing: 0.0
@@ -50,3 +50,9 @@ uda:
   lit_bnm_weight: 0.15
   lit_bnm_start: 5
   lit_bnm_ramp: 10
+  lit_supcon_weight: 0.5
+  lit_supcon_temperature: 0.1
+  lit_target_supcon_weight: 0.2
+  lit_target_supcon_start: 10
+  lit_target_supcon_ramp: 15
+  lit_target_topk: 8
