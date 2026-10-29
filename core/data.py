@@ -120,6 +120,15 @@ def robust_scene_normalize(image: np.ndarray, mode: str = "l2") -> np.ndarray:
         std = flat[mask].std(axis=0, keepdims=True)
         flat = (flat - mean) / np.maximum(std, 1e-6)
         image = flat.reshape(image.shape).astype(np.float32)
+    elif mode == "scale":
+        # Literature protocol (sklearn.preprocessing.scale over ALL pixels,
+        # background included).  Background is deliberately NOT zeroed so that
+        # patch content matches the official MSDA/TAPDA pipeline.
+        flat = image.reshape(-1, image.shape[-1])
+        mean = flat.mean(axis=0, keepdims=True)
+        std = flat.std(axis=0, keepdims=True)
+        image = ((flat - mean) / np.maximum(std, 1e-6)).reshape(image.shape)
+        return np.asarray(image, dtype=np.float32)
     else:
         global_scale = float(np.max(np.abs(image[valid])))
         if global_scale > 0.0:

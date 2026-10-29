@@ -16,15 +16,21 @@ training:
   lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
+  # literature data protocol: all-pixel z-score keeps relative magnitude
+  input_normalization: scale
   # literature-aligned source budget: 180 labeled samples per class, all for training
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
   # kept for the ratio-based fallback path (ignored when samples_per_class > 0)
   source_train_ratio: 0.38
-  steps_per_epoch: 40
+  steps_per_epoch: 39
   source_sampler_power: 1.0
-  target_train_max_samples: 30000
-  band_alignment_strength: 0.1
+  target_train_max_samples: 100000
+  # literature data protocol: unlabeled pool = labeled target pixels
+  target_pool_from_gt: true
+  # literature data protocol: no random source augmentation
+  source_augment: false
+  band_alignment_strength: 0.0
   ema_decay: 0.996
   label_smoothing: 0.035
   num_workers: 8

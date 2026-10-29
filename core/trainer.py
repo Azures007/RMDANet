@@ -135,6 +135,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source_train_ratio", type=float, default=0.95)
     parser.add_argument("--source_samples_per_class", type=int, default=0)
     parser.add_argument("--target_train_max_samples", type=int, default=100000)
+    parser.add_argument(
+        "--target_pool_from_gt",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Literature protocol: the unlabeled target training pool is the set of "
+             "labeled target pixels.  The GT is used ONLY to select which pixels form "
+             "the pool; labels never enter any loss.",
+    )
+    parser.add_argument(
+        "--source_augment",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Random source-patch augmentation (the official MSDA recipe does not use it).",
+    )
     parser.add_argument("--target_sampling_grid", type=int, default=30)
     parser.add_argument("--target_sampling_stratified_fraction", type=float, default=0.82)
     parser.add_argument("--neighbor_radius", type=int, default=3)
@@ -977,15 +991,29 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0.0)) != 0.0:
         raise RuntimeError("v7.1 strict UDA: target-GT training masks are forbidden")
     target_coordinates_all = coordinates_from_mask(target_mask_full)
-    subset = spatially_stratified_subset(
-        target_coordinates_all,
-        maximum=args.target_train_max_samples,
-        seed=args.seed + 17,
-        grid_size=args.target_sampling_grid,
-        stratified_fraction=args.target_sampling_stratified_fraction,
-    )
-    target_coordinates = target_coordinates_all[subset]
-    print(f"[TARGET-MASK] image-derived unlabeled scene: {len(target_coordinates)}")
+    if bool(getattr(args, "target_pool_from_gt", False)):
+        # Literature protocol: the unlabeled pool is the set of labeled target
+        # pixels.  The GT is read ONLY to select which pixels belong to the pool;
+        # no label is ever used in a loss (verified by the locked final eval).
+        pool_gt = load_target_ground_truth_only(
+            args.data_path, args.target_name, args.num_classes
+        )
+        pool_mask = (pool_gt > 0) & target_mask_full
+        target_coordinates = coordinates_from_mask(pool_mask)
+        print(
+            f"[TARGET-MASK] literature protocol: labeled-pixel pool "
+            f"{len(target_coordinates)} (GT used for pool selection only)"
+        )
+    else:
+        subset = spatially_stratified_subset(
+            target_coordinates_all,
+            maximum=args.target_train_max_samples,
+            seed=args.seed + 17,
+            grid_size=args.target_sampling_grid,
+            stratified_fraction=args.target_sampling_stratified_fraction,
+        )
+        target_coordinates = target_coordinates_all[subset]
+        print(f"[TARGET-MASK] image-derived unlabeled scene: {len(target_coordinates)}")
     neighbor_ids = build_neighbor_ids(
         target_coordinates,
         radius=args.neighbor_radius,
@@ -997,7 +1025,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         source_train_coordinates,
         patch_size=args.patch_size,
         labels=source_train_labels,
-        augment=True,
+        augment=bool(getattr(args, "source_augment", True)),
     )
     source_validation_dataset = (
         PatchDataset(
