@@ -37,13 +37,13 @@ def main():
     t.data_path=args.data_path
     t.num_workers=0
     device=torch.device(args.device if torch.cuda.is_available() and args.device.startswith('cuda') else 'cpu')
-    mode='median' if t.amplitude_channel else 'l2'
+    mode=str(getattr(t,'input_normalization','') or ('median' if t.amplitude_channel else 'l2'))
+    amplitude_input=bool(getattr(t,'amplitude_input',False))
     # Source GT is permissible for source-only input preparation; target GT still unopened.
     src=load_source_scene(t.data_path,t.source_name,t.num_classes,normalize_mode=mode)
     target=load_target_image_only(t.data_path,t.target_name,normalize_mode=mode)
     aligned,_=align_target_bands(src.image,target.image,strength=t.band_alignment_strength,
-                                  renormalize=mode!='median')
-    amplitude_input=bool(getattr(t,'amplitude_input',False))
+                                  renormalize=mode=='l2')
     if amplitude_input:
         if target.amplitude is None:
             raise RuntimeError('amplitude_input requires a target amplitude map')

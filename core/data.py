@@ -109,6 +109,17 @@ def robust_scene_normalize(image: np.ndarray, mode: str = "l2") -> np.ndarray:
         norms = np.linalg.norm(image, axis=-1, keepdims=True)
         scale = float(np.median(norms[valid]))
         image = image / max(scale, 1e-6)
+    elif mode == "band":
+        # Literature-style normalization (MSDA / TAPDA / SCLUDA): z-score each
+        # band over the whole cube.  Unlike the per-pixel L2 norm this keeps the
+        # relative brightness of every pixel, which is the only cue separating
+        # near-parallel spectra.
+        flat = image.reshape(-1, image.shape[-1])
+        mask = valid.reshape(-1)
+        mean = flat[mask].mean(axis=0, keepdims=True)
+        std = flat[mask].std(axis=0, keepdims=True)
+        flat = (flat - mean) / np.maximum(std, 1e-6)
+        image = flat.reshape(image.shape).astype(np.float32)
     else:
         global_scale = float(np.max(np.abs(image[valid])))
         if global_scale > 0.0:

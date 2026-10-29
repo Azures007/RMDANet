@@ -292,6 +292,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--diagnostic_target_oa", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--amplitude_channel", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument(
+        "--input_normalization",
+        type=str,
+        default="l2",
+        choices=["l2", "median", "band"],
+        help="Input normalization: per-pixel L2 (default), scene-median scaling, "
+             "or per-band z-score (literature-style, keeps relative magnitude).",
+    )
+    parser.add_argument(
         "--amplitude_input",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -885,7 +893,10 @@ def evaluate_target(
 
 
 def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, Any]:
-    normalize_mode = "median" if getattr(args, "amplitude_channel", False) else "l2"
+    normalize_mode = str(
+        getattr(args, "input_normalization", "")
+        or ("median" if getattr(args, "amplitude_channel", False) else "l2")
+    )
     source_scene = load_source_scene(
         args.data_path, args.source_name, args.num_classes, normalize_mode=normalize_mode
     )
@@ -898,7 +909,8 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         source_scene.image,
         target_scene.image,
         strength=args.band_alignment_strength,
-        renormalize=normalize_mode != "median",
+        # Only the per-pixel L2 pipeline re-normalizes after alignment.
+        renormalize=normalize_mode == "l2",
     )
     if getattr(args, "amplitude_input", False):
         if source_scene.amplitude is None or target_scene.amplitude is None:

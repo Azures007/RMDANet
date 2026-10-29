@@ -28,6 +28,8 @@ training:
   steps_per_epoch: 40
   source_sampler_power: 1.0
   target_train_max_samples: 30000
+  # literature-style per-band z-score keeps relative magnitude (plan A v2)
+  input_normalization: band
   band_alignment_strength: 0.45
   ema_decay: 0.996
   label_smoothing: 0.035
@@ -38,7 +40,7 @@ uda:
   ablation_id: full
   align_maturity_gate: false
   # scheme A: per-pixel log-magnitude input channel (spectral shape kept)
-  amplitude_input: true
+  amplitude_input: false
   independent_target_reweight: false
   # no source validation -> report the final epoch (literature-aligned)
   select_final_epoch: true
