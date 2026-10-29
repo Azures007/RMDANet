@@ -264,6 +264,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--checkpoint_topk", type=int, default=5)
     parser.add_argument(
+        "--optimizer_type",
+        type=str,
+        default="adamw",
+        choices=["adamw", "sgd"],
+        help="Student optimizer. 'sgd' (momentum 0.9) matches the HSI-UDA literature.",
+    )
+    parser.add_argument(
+        "--constant_lr",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Keep the base learning rate constant instead of using cosine decay "
+             "(literature-aligned SGD runs use a constant lr).",
+    )
+    parser.add_argument(
         "--select_final_epoch",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -1116,6 +1130,10 @@ def run_epoch(
         minimum_lr=1.0e-6,
         warmup_epochs=2 if refinement else 5,
     )
+    if bool(getattr(args, "constant_lr", False)):
+        lr = float(args.refine_lr if refinement else args.lr)
+        for group in optimizer.param_groups:
+            group["lr"] = lr
     target_iterator = iter(target_loader)
     accumulator: dict[str, float] = {}
     batches = 0
@@ -1769,7 +1787,15 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         ),
     )
 
-    optimizer = AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if str(getattr(args, "optimizer_type", "adamw")).lower() == "sgd":
+        optimizer = torch.optim.SGD(
+            student.parameters(),
+            lr=args.lr,
+            momentum=0.9,
+            weight_decay=args.weight_decay,
+        )
+    else:
+        optimizer = AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = make_grad_scaler(args.amp and device.type == "cuda")
     candidates: list[dict[str, Any]] = []
     log_path = run_dir / "training_log.jsonl"

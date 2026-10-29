@@ -1,8 +1,8 @@
-# Houston: Houston13 -> Houston18
+﻿# Houston: Houston13 -> Houston18
 # Literature-aligned protocol (v3.0): 180 labeled source samples per class,
 # no source validation split, 50 epochs x 40 steps, final epoch reported.
 # Patch size aligned with the HSI-UDA literature (7x7).
-# AdamW/cosine, batch size and extra modules are intentionally kept from v7.1.
+# SGD/momentum 0.9 with constant lr and batch 32 follow the HSI-UDA literature;
 dataset:
   source_name: Houston13
   target_name: Houston18
@@ -10,13 +10,16 @@ dataset:
 
 training:
   patch_size: 7
-  batch_size: 128
+  batch_size: 32
   eval_batch_size: 512
   eval_interval: 5
   epochs: 50
-  lr: 0.0003
+  lr: 0.1
   weight_decay: 0.0004
   grad_clip: 5.0
+  # literature-aligned optimizer: SGD + momentum 0.9, constant lr
+  optimizer_type: sgd
+  constant_lr: true
   # literature-aligned source budget: 180 labeled samples per class, all for training
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
@@ -38,10 +41,10 @@ uda:
   # no source validation -> report the final epoch (literature-aligned)
   select_final_epoch: true
   # schedule scaled to 50 epochs (proportional to the 60-epoch v2.2b schedule)
-  anchor_freeze_epoch: 17
-  pseudo_start_epoch: 17
+  anchor_freeze_epoch: 8
+  pseudo_start_epoch: 8
   pseudo_warm_epochs: 10
-  lmmd_start_epoch: 25
+  lmmd_start_epoch: 15
   lmmd_warm_epochs: 8
   # pseudo-label gates
   pseudo_confidence: 0.95
