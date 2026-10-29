@@ -21,6 +21,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -68,6 +69,13 @@ def build_msda_parser():
     parser.add_argument("--teacher_alpha", type=float, default=0.9)
     parser.add_argument("--num_k", type=int, default=3)
     parser.add_argument("--mic_weight", type=float, default=0.5)
+    parser.add_argument(
+        "--use_official_data",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Build the Pavia loaders with the official MSDA data pipeline "
+             "(utils.load_data_pavia + get_sample_data + get_all_data).",
+    )
     return parser
 
 
@@ -75,6 +83,36 @@ def _masked_consistency(classifier, backbone, masked_input, pseudo_label, pseudo
     logits, _ = classifier(backbone(masked_input))
     ce = F.cross_entropy(logits, pseudo_label, reduction="none")
     return (pseudo_prob * ce).mean() * weight
+
+
+def _official_pavia_loaders(msda_dir: str, half_width: int, batch_size: int, num_workers: int):
+    """Build Pavia train/target loaders exactly as up2pc.py does."""
+    import torch.utils.data as torch_data
+    from utils import get_all_data, get_sample_data, load_data_pavia  # type: ignore
+
+    root = Path(msda_dir) / "data" / "Pavia"
+    data_s, label_s = load_data_pavia(str(root / "paviaU.mat"), str(root / "paviaU_gt_7.mat"))
+    data_t, label_t = load_data_pavia(str(root / "pavia.mat"), str(root / "pavia_gt_7.mat"))
+    train_x, train_y = get_sample_data(data_s, label_s, half_width, 180)
+    target_x, target_y = get_all_data(data_t, label_t, half_width)
+    source_dataset = torch_data.TensorDataset(
+        torch.tensor(train_x), torch.tensor(train_y)
+    )
+    target_dataset = torch_data.TensorDataset(
+        torch.tensor(target_x), torch.tensor(target_y)
+    )
+    source_loader = torch_data.DataLoader(
+        source_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, drop_last=True,
+    )
+    target_loader = torch_data.DataLoader(
+        target_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=num_workers, drop_last=True,
+    )
+    num_classes = int(np.max(train_y)) + 1
+    bands = int(train_x.shape[1])
+    class_weights = torch.ones(num_classes)
+    return source_loader, target_loader, bands, num_classes, class_weights
 
 
 def train(args) -> dict:
@@ -104,6 +142,23 @@ def train(args) -> dict:
     loaders = build_loaders(args, device)
     num_classes = int(loaders["num_classes"])
     bands = int(loaders["bands"])
+    source_loader = loaders["source_loader"]
+    target_loader = loaders["target_loader"]
+    class_weights = loaders["class_weights"]
+    if bool(getattr(args, "use_official_data", False)):
+        source_loader, target_loader, bands, num_classes, class_weights = (
+            _official_pavia_loaders(
+                official["dir"],
+                half_width=args.patch_size // 2,
+                batch_size=args.batch_size,
+                num_workers=min(4, args.num_workers),
+            )
+        )
+        class_weights = class_weights.to(device)
+        print(
+            f"[msda-recipe] official Pavia data pipeline: "
+            f"source={len(source_loader.dataset)} target={len(target_loader.dataset)}"
+        )
 
     backbone = official["SSSE_test"](
         input_channels=bands, patch_size=args.patch_size, n_classes=num_classes
@@ -139,9 +194,10 @@ def train(args) -> dict:
         lr=args.lr, momentum=0.9, weight_decay=args.weight_decay,
     )
 
-    source_loader = loaders["source_loader"]
-    target_loader = loaders["target_loader"]
-    class_weights = loaders["class_weights"]
+    if not bool(getattr(args, "use_official_data", False)):
+        source_loader = loaders["source_loader"]
+        target_loader = loaders["target_loader"]
+        class_weights = loaders["class_weights"]
     num_iter = len(source_loader)
     target_iterator = iter(target_loader)
     start_time = time.time()

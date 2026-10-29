@@ -35,6 +35,8 @@ def get_args(options):
         args.epochs = options.epochs
     if options.batch_size is not None:
         args.batch_size = options.batch_size
+    if options.use_official_data:
+        args.use_official_data = True
     args.use_gt_target_mask = False
     args.target_gt_mix_ratio = 0.0
     args.diagnostic_target_oa = False
@@ -56,6 +58,11 @@ def main():
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--batch-size", type=int)
+    parser.add_argument(
+        "--use-official-data",
+        action="store_true",
+        help="Use the official MSDA Pavia data pipeline (utils.get_sample_data/get_all_data).",
+    )
     parser.add_argument("--dry-run", action="store_true")
     options = parser.parse_args()
 
