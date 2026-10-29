@@ -5,7 +5,7 @@ dataset:
   num_classes: 12
 
 training:
-  patch_size: 7
+  patch_size: 9
   batch_size: 32
   eval_batch_size: 256
   eval_interval: 10
