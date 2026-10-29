@@ -44,7 +44,7 @@ uda:
   lit_tau_end: 0.85
   lit_pseudo_start: 10
   lit_pseudo_ramp: 15
-  lit_pseudo_weight: 0.10
+  lit_pseudo_weight: 0.05
   lit_discrepancy_weight: 2.0
   lit_discrepancy_ramp: 10
   lit_bnm_weight: 0.15
@@ -52,7 +52,7 @@ uda:
   lit_bnm_ramp: 10
   lit_supcon_weight: 0.5
   lit_supcon_temperature: 0.1
-  lit_target_supcon_weight: 0.10
+  lit_target_supcon_weight: 0.05
   lit_target_supcon_start: 10
   lit_target_supcon_ramp: 15
   lit_target_topk: 8
