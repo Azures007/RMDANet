@@ -18,7 +18,7 @@ training:
   weight_decay: 0.0004
   grad_clip: 5.0
   # local feature extractor: 'ours' (v7.1) or 'dcrn' (SCLUDA stem)
-  backbone: dcrn
+  backbone: ours
   # AdamW + cosine lr (isolating the DCRN backbone change)
   optimizer_type: adamw
   constant_lr: false
@@ -39,6 +39,9 @@ training:
 
 uda:
   ablation_id: full
+  # dual classifier: supervised second head + target pseudo-label consistency filter
+  dual_head_filter: true
+  lambda_dual_source: 0.5
   align_maturity_gate: false
   independent_target_reweight: false
   # no source validation -> report the final epoch (literature-aligned)
