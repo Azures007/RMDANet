@@ -19,7 +19,7 @@ training:
   # source budget: 20% training labels + 18% validation (train+val total)
   source_train_ratio: 0.38
   source_budget_train_fraction: 0.526
-  steps_per_epoch: 40
+  steps_per_epoch: 30
   source_sampler_power: 1.0
   source_samples_per_class: 0
   target_train_max_samples: 15000
