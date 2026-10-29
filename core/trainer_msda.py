@@ -95,7 +95,9 @@ def _official_pavia_loaders(msda_dir: str, half_width: int, batch_size: int, num
     data_s, label_s = load_data_pavia(str(root / "paviaU.mat"), str(root / "paviaU_gt_7.mat"))
     data_t, label_t = load_data_pavia(str(root / "pavia.mat"), str(root / "pavia_gt_7.mat"))
     train_x, train_y = get_sample_data(data_s, label_s, half_width, 180)
-    target_x, target_y = get_all_data(data_t, label_t, half_width)
+    target_outputs = get_all_data(data_t, label_t, half_width)
+    # get_all_data returns (testID, testX, testY, G, RandPerm, Row, Column)
+    target_x, target_y = target_outputs[1], target_outputs[2]
     source_dataset = torch_data.TensorDataset(
         torch.tensor(train_x), torch.tensor(train_y)
     )
