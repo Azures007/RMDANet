@@ -13,12 +13,12 @@ training:
   eval_batch_size: 512
   eval_interval: 5
   epochs: 50
-  lr: 0.1
+  lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
-  # literature-aligned optimizer: SGD + momentum 0.9, constant lr
-  optimizer_type: sgd
-  constant_lr: true
+  # AdamW + cosine lr (SGD lr 0.1 diverged for this multi-loss model)
+  optimizer_type: adamw
+  constant_lr: false
   # literature-aligned source budget: 180 labeled samples per class, all for training
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
