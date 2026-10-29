@@ -21,6 +21,7 @@ training:
   source_budget_train_fraction: 1.0
   # kept for the ratio-based fallback path (ignored when samples_per_class > 0)
   # 20% of each class's labeled source pixels, all used for training (no val split)
+  source_train_ratio: 0.20
   steps_per_epoch: 40
   source_sampler_power: 1.0
   target_train_max_samples: 15000
