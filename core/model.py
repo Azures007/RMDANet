@@ -379,7 +379,6 @@ class DCRNChannelAttention(nn.Module):
         super().__init__()
         hidden = max(1, in_planes // ratio)
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
-        self.max_pool = nn.AdaptiveMaxPool2d(1)
         self.fc = nn.Sequential(
             nn.Conv2d(in_planes, hidden, 1, bias=False),
             nn.ReLU(inplace=True),
@@ -388,9 +387,10 @@ class DCRNChannelAttention(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.sigmoid(
-            self.fc(self.avg_pool(x)) + self.fc(self.max_pool(x))
-        )
+        # Global max via amax: same value as AdaptiveMaxPool2d(1) but with a
+        # deterministic backward pass (required by torch.use_deterministic_algorithms).
+        global_max = torch.amax(x, dim=(2, 3), keepdim=True)
+        return self.sigmoid(self.fc(self.avg_pool(x)) + self.fc(global_max))
 
 
 class DCRNSpatialAttention(nn.Module):
