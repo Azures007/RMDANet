@@ -1,0 +1,51 @@
+# Houston: Houston13 -> Houston18 (MSDA official recipe, faithful port)
+dataset:
+  source_name: Houston13
+  target_name: Houston18
+  num_classes: 7
+
+training:
+  patch_size: 9
+  batch_size: 32
+  eval_batch_size: 256
+  eval_interval: 10
+  log_interval: 10
+  epochs: 50
+  lr: 0.1
+  weight_decay: 0.0005
+  grad_clip: 5.0
+  optimizer_type: sgd
+  constant_lr: true
+  input_normalization: band
+  source_samples_per_class: 180
+  source_budget_train_fraction: 1.0
+  source_train_ratio: 0.38
+  strict_source_budget: true
+  steps_per_epoch: 40
+  min_steps_per_epoch: 5
+  source_sampler_power: 1.0
+  source_class_weight_power: 0.0
+  target_train_max_samples: 30000
+  band_alignment_strength: 0.0
+  num_workers: 4
+  amp: false
+  label_smoothing: 0.0
+
+uda:
+  use_gt_target_mask: false
+  target_gt_mix_ratio: 0.0
+  select_final_epoch: true
+  mcc_temperature: 9.0
+  teacher_alpha: 0.9
+  num_k: 3
+  mic_weight: 0.5
+  mask_block_size: 32
+  mask_ratio_a: 0.7
+  mask_ratio_b: 0.7
+  spectral_block_size: 9
+  spatial_block_size: 4
+  mask_color_jitter_s: 0.2
+  mask_color_jitter_p: 0.2
+  mask_blur: true
+  spectral_mask: true
+  spatial_mask: true
