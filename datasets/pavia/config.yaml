@@ -16,7 +16,7 @@ training:
   lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
-  # literature-aligned source budget: 180 labeled samples per class, all for training
+  # source budget: 20% of each class, fully used for training (no validation split)
   source_samples_per_class: 0
   source_budget_train_fraction: 1.0
   # kept for the ratio-based fallback path (ignored when samples_per_class > 0)
