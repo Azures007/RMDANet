@@ -28,8 +28,8 @@ training:
   steps_per_epoch: 40
   source_sampler_power: 1.0
   target_train_max_samples: 30000
-  # literature-style per-band z-score keeps relative magnitude (plan A v2)
-  input_normalization: band
+  # scene-median scaling keeps relative brightness with unchanged spectral shape (plan A v3)
+  input_normalization: median
   band_alignment_strength: 0.45
   ema_decay: 0.996
   label_smoothing: 0.035
