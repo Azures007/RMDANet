@@ -1,6 +1,7 @@
 # Houston: Houston13 -> Houston18
-# 3-seed mean: 78.56 ± 1.28
-# seed 1233: 77.13 | seed 1237: 78.31 | seed 1238: 80.24
+# Unified protocol v2: same modules / same schedule / same epochs for all datasets.
+# Per-dataset numeric hyperparameters are limited to: patch_size, lr, band_alignment_strength,
+# prat_style_max (dataset-specific PRAT strength) and target_train_max_samples.
 dataset:
   source_name: Houston13
   target_name: Houston18
@@ -8,16 +9,19 @@ dataset:
 
 training:
   patch_size: 17
-  batch_size: 96
-  eval_batch_size: 384
-  eval_interval: 20
-  epochs: 280
+  batch_size: 128
+  eval_batch_size: 512
+  eval_interval: 10
+  epochs: 120
   lr: 0.0003
   weight_decay: 0.0004
   grad_clip: 5.0
-  # r23 protocol: 20% training labels + 18% validation (budget = train+val total)
+  # source budget: 20% training labels + 18% validation (train+val total)
   source_train_ratio: 0.38
   source_budget_train_fraction: 0.526
+  steps_per_epoch: 20
+  source_sampler_power: 1.0
+  source_samples_per_class: 0
   target_train_max_samples: 30000
   band_alignment_strength: 0.45
   ema_decay: 0.996
@@ -27,35 +31,41 @@ training:
 
 uda:
   ablation_id: full
-  # v6-compatible behavior (r23): no maturity gate, no brittle-pseudo downweight
+  # unified v6-compatible behaviour
   align_maturity_gate: false
   independent_target_reweight: false
-
-  pseudo_start_epoch: 100
-  target_gt_mix_ratio: 0.0
-  use_gt_target_mask: false
-  pseudo_warm_epochs: 80
-  # scheme B rolled back
+  anchor_freeze_epoch: 40
+  # unified schedule (absolute epochs, identical for all datasets)
+  pseudo_start_epoch: 40
+  pseudo_warm_epochs: 24
+  lmmd_start_epoch: 40
+  lmmd_warm_epochs: 24
+  # unified pseudo-label gates
+  pseudo_confidence: 0.95
+  reliability_threshold: 0.45
+  pseudo_margin: 0.10
   pseudo_min_per_class: 0
-  pseudo_confidence: 0.90
-  reliability_threshold: 0.48
-  cempa_class_cap: 40
-  cempa_min_age: 3
-  cempa_min_streak: 3
-
-  prat_style_max: 0.64
-  prat_warm_epochs: 55
-
-  # 与 Pavia 统一：CCA + 原型对齐打开
+  # unified module set: CCA + CORAL + LMMD + prototype alignment
   lambda_cca: 0.5
   cca_start_epoch: 0
   cca_temperature: 0.10
+  lambda_coral: 0.5
+  lambda_lmmd: 0.5
   prototype_align_flag: true
   prototype_weight: 0.03
   prototype_confidence: 0.95
   prototype_temperature: 0.08
-
-  # 仍保留差异（待批 1 实验统一）
-  strict_class_balance_strength: 0.0
-  include_target_scale_mi: false
-  memory_update_start_epoch: 100
+  include_target_scale_mi: true
+  strict_class_balance_strength: 1.0
+  use_early_target_adaptation: true
+  memory_update_start_epoch: 1
+  # dataset-specific PRAT strength
+  prat_style_max: 0.64
+  prat_warm_epochs: 55
+  # unified multi-prototype quotas
+  cempa_class_cap: 24
+  cempa_min_age: 2
+  cempa_min_streak: 2
+  # strict UDA guards
+  target_gt_mix_ratio: 0.0
+  use_gt_target_mask: false
