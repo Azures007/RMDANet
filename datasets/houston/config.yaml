@@ -14,7 +14,9 @@ training:
   lr: 0.0003
   weight_decay: 0.0004
   grad_clip: 5.0
-  source_train_ratio: 0.20
+  # r23 protocol: 20% training labels + 18% validation (budget = train+val total)
+  source_train_ratio: 0.38
+  source_budget_train_fraction: 0.526
   target_train_max_samples: 50000
   band_alignment_strength: 0.45
   ema_decay: 0.996
@@ -24,6 +26,9 @@ training:
 
 uda:
   ablation_id: full
+  # v6-compatible behavior (r23): no maturity gate, no brittle-pseudo downweight
+  align_maturity_gate: false
+  independent_target_reweight: false
 
   pseudo_start_epoch: 100
   target_gt_mix_ratio: 0.0

@@ -77,7 +77,7 @@ def main():
     p.add_argument('--data-root',default='/root/autodl-tmp/Datasets')
     p.add_argument('--out-root',default=str(ROOT/'results_v71'))
     p.add_argument('--gpu',type=int,default=0)
-    p.add_argument('--workers',type=int,default=0)
+    p.add_argument('--workers',type=int,default=8)
     p.add_argument('--epochs',type=int)
     p.add_argument('--steps-per-epoch',type=int)
     p.add_argument('--batch-size',type=int)

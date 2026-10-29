@@ -7,12 +7,16 @@ training:
   patch_size: 7
   batch_size: 128
   eval_batch_size: 256
-  epochs: 120
+  epochs: 60
   lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
-  source_train_ratio: 0.0
-  source_samples_per_class: 200
+  # r23 protocol: 20% training labels + 18% validation (budget = train+val total)
+  source_train_ratio: 0.38
+  source_budget_train_fraction: 0.526
+  # cap optimizer steps per epoch (20% labels would otherwise double the updates)
+  steps_per_epoch: 15
+  source_samples_per_class: 0
   target_train_max_samples: 15000
   band_alignment_strength: 0.1
   ema_decay: 0.996
@@ -22,6 +26,9 @@ training:
 
 uda:
   ablation_id: full
+  # v6-compatible behavior (r23): no maturity gate, no brittle-pseudo downweight
+  align_maturity_gate: false
+  independent_target_reweight: false
   pseudo_start_epoch: 40
   lmmd_start_epoch: 60
   pseudo_warm_epochs: 30
