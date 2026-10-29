@@ -13,11 +13,13 @@ training:
   eval_batch_size: 512
   eval_interval: 5
   epochs: 50
-  lr: 0.1
+  lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
-  # SGD momentum 0.9 with cosine lr (literature-style optimizer; batch kept at 128)
-  optimizer_type: sgd
+  # local feature extractor: 'ours' (v7.1) or 'dcrn' (SCLUDA stem)
+  backbone: dcrn
+  # AdamW + cosine lr (isolating the DCRN backbone change)
+  optimizer_type: adamw
   constant_lr: false
   # literature-aligned source budget: 180 labeled samples per class, all used for training
   source_samples_per_class: 180

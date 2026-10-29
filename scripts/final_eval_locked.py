@@ -53,6 +53,7 @@ def main():
        aspp_mode=t.aspp_mode,pooling_mode=t.pooling_mode,
        spectral_fusion_mode=t.spectral_fusion_mode,amplitude_channel=t.amplitude_channel,
        amplitude_input=amplitude_input,
+       backbone=str(getattr(t,'backbone','ours')),
        enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0)).to(device)
     model.load_state_dict(checkpoint['model'],strict=True);model.eval()
     print('[FINAL EVAL] Loading TARGET GT NOW for reporting ONLY')

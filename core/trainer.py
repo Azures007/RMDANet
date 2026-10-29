@@ -299,6 +299,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ablation_id", type=str, default="full")
     parser.add_argument("--run_name", type=str, default="")
     parser.add_argument("--diagnostic_target_oa", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--backbone",
+        type=str,
+        default="ours",
+        choices=["ours", "dcrn"],
+        help="Local feature extractor: 'ours' (v7.1 encoder) or 'dcrn' "
+             "(SCLUDA/DCRN stem; only the stem is replaced).",
+    )
     parser.add_argument("--amplitude_channel", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument(
         "--input_normalization",
@@ -1775,6 +1783,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         spectral_fusion_mode=args.spectral_fusion_mode,
         amplitude_channel=args.amplitude_channel,
         amplitude_input=bool(getattr(args, "amplitude_input", False)),
+        backbone=str(getattr(args, "backbone", "ours")),
         enable_dual_head=(args.dual_head_filter or args.lambda_dual_source > 0),
     ).to(device)
     teacher = copy.deepcopy(student).to(device)

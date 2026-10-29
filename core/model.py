@@ -372,6 +372,103 @@ class ModelOutput:
 
 
 
+class DCRNChannelAttention(nn.Module):
+    """Channel attention from DCRN (SCLUDA, TGRS 2023)."""
+
+    def __init__(self, in_planes: int, ratio: int = 16) -> None:
+        super().__init__()
+        hidden = max(1, in_planes // ratio)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.max_pool = nn.AdaptiveMaxPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Conv2d(in_planes, hidden, 1, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden, in_planes, 1, bias=False),
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.sigmoid(
+            self.fc(self.avg_pool(x)) + self.fc(self.max_pool(x))
+        )
+
+
+class DCRNSpatialAttention(nn.Module):
+    """Spatial attention from DCRN (SCLUDA, TGRS 2023)."""
+
+    def __init__(self, kernel_size: int = 7) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(2, 1, kernel_size, padding=kernel_size // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+        return self.sigmoid(self.conv(torch.cat([avg_out, max_out], dim=1)))
+
+
+class DCRNLocalStem(nn.Module):
+    """DCRN convolutional stem (SCLUDA reference backbone), spatial output.
+
+    Input  : [B, bands, H, W]
+    Output : [B, 288, H, W]  (192 spectral + 96 spatial channels, DCRN attention)
+    The rest of the dual-reliability pipeline (ASPP, centre pooling, PRAT,
+    memory pseudo-labels, CCA/CORAL/LMMD, ...) is unchanged.
+    """
+
+    def __init__(self, input_channels: int) -> None:
+        super().__init__()
+        self.feature_dim = int(input_channels)
+        self.conv1 = nn.Conv3d(1, 24, kernel_size=(7, 1, 1), stride=(2, 1, 1), bias=True)
+        self.bn1 = nn.BatchNorm3d(24)
+        self.conv2 = nn.Conv3d(24, 24, kernel_size=(7, 1, 1), stride=1, padding=(3, 0, 0), bias=True)
+        self.bn2 = nn.BatchNorm3d(24)
+        self.conv3 = nn.Conv3d(24, 24, kernel_size=(7, 1, 1), stride=1, padding=(3, 0, 0), bias=True)
+        self.bn3 = nn.BatchNorm3d(24)
+        self.conv4 = nn.Conv3d(
+            24, 192, kernel_size=(((self.feature_dim - 7) // 2 + 1), 1, 1), bias=True
+        )
+        self.bn4 = nn.BatchNorm3d(192)
+        self.conv5 = nn.Conv3d(1, 24, (self.feature_dim, 1, 1))
+        self.bn5 = nn.BatchNorm3d(24)
+        self.conv6 = nn.Conv3d(24, 24, kernel_size=(1, 3, 3), stride=1, padding=(0, 1, 1), bias=True)
+        self.bn6 = nn.BatchNorm3d(24)
+        self.conv7 = nn.Conv3d(24, 96, kernel_size=(1, 3, 3), stride=1, padding=(0, 1, 1), bias=True)
+        self.bn7 = nn.BatchNorm3d(96)
+        self.conv8 = nn.Conv3d(24, 96, kernel_size=1)
+        self.inter_size = 192 + 96
+        self.ca = DCRNChannelAttention(self.inter_size)
+        self.sa = DCRNSpatialAttention()
+        self.activation = nn.ReLU(inplace=True)
+        for module in self.modules():
+            if isinstance(module, nn.Conv3d):
+                nn.init.kaiming_normal_(module.weight)
+                if module.bias is not None:
+                    module.bias.data.zero_()
+            elif isinstance(module, nn.BatchNorm3d):
+                module.weight.data.fill_(1.0)
+                module.bias.data.zero_()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.unsqueeze(1)  # [B, 1, bands, H, W]
+        x1 = self.activation(self.bn1(self.conv1(x)))
+        residual = x1
+        x1 = self.activation(self.bn2(self.conv2(x1)))
+        x1 = self.conv3(x1)
+        x1 = self.activation(self.bn3(residual + x1))
+        x1 = self.activation(self.bn4(self.conv4(x1)))
+        x1 = x1.reshape(x1.size(0), x1.size(1), x1.size(3), x1.size(4))
+        x2 = self.activation(self.bn5(self.conv5(x)))
+        residual2 = self.conv8(x2)
+        x2 = self.activation(self.bn6(self.conv6(x2)))
+        x2 = self.conv7(x2)
+        x2 = self.activation(self.bn7(residual2 + x2))
+        x2 = x2.reshape(x2.size(0), x2.size(1), x2.size(3), x2.size(4))
+        features = torch.cat((x1, x2), dim=1)
+        features = self.ca(features) * features
+        return self.sa(features) * features
+
+
 class DualReliabilityEncoder(nn.Module):
     def __init__(
         self,
@@ -384,6 +481,7 @@ class DualReliabilityEncoder(nn.Module):
         spectral_fusion_mode: str = "reliable",
         amplitude_channel: bool = False,
         amplitude_input: bool = False,
+        backbone: str = "ours",
         enable_dual_head: bool = False,
     ) -> None:
         super().__init__()
@@ -393,17 +491,28 @@ class DualReliabilityEncoder(nn.Module):
         # only the real spectral bands.
         self.amplitude_input = bool(amplitude_input)
         self.bands = int(bands) - (1 if self.amplitude_input else 0)
+        self.backbone = str(backbone)
         self.num_classes = int(num_classes)
         self.projection_dim = int(projection_dim)
         self.aspp_mode = aspp_mode
         self.pooling_mode = pooling_mode
         self.spectral_fusion_mode = spectral_fusion_mode
-        self.local3d = LocalSpectralSpatialEncoder()
-        self.semantic2d = nn.Sequential(
-            ResidualBlock2D(64, 96, dropout=0.06),
-            ResidualBlock2D(96, 128, dropout=0.08),
-            ResidualBlock2D(128, 128, dropout=0.08),
-        )
+        if self.backbone == "dcrn":
+            # Only the local feature extractor is replaced (SCLUDA/DCRN stem);
+            # ASPP, centre pooling, spectral branch and all losses are unchanged.
+            self.local3d = DCRNLocalStem(self.bands)
+            self.semantic2d = nn.Sequential(
+                nn.Conv2d(288, 128, kernel_size=1, bias=False),
+                nn.BatchNorm2d(128),
+                nn.SiLU(inplace=True),
+            )
+        else:
+            self.local3d = LocalSpectralSpatialEncoder()
+            self.semantic2d = nn.Sequential(
+                ResidualBlock2D(64, 96, dropout=0.06),
+                ResidualBlock2D(96, 128, dropout=0.08),
+                ResidualBlock2D(128, 128, dropout=0.08),
+            )
         self.micro_aspp = ScaleSelectiveMicroASPP(128, 32, mode=aspp_mode)
         self.pool = CenterGuidedPooling(
             128, center_size=3, attention_temperature=0.12, mode=pooling_mode
@@ -492,9 +601,15 @@ class DualReliabilityEncoder(nn.Module):
         else:
             spectral_x = x
             amplitude_x = None
-        features3d = self.local3d(spectral_x)
-        spatial = features3d.mean(dim=2)
-        spatial = self.semantic2d(spatial)
+        if self.backbone == "dcrn":
+            spatial = self.local3d(spectral_x)
+            spatial = self.semantic2d(spatial)
+            scale_weights = None
+        else:
+            features3d = self.local3d(spectral_x)
+            spatial = features3d.mean(dim=2)
+            spatial = self.semantic2d(spatial)
+            scale_weights = None
         spatial, scale_weights = self.micro_aspp(spatial)
         pooled, center_weights, attention_map = self.pool(spatial)
         context_features = F.normalize(self.projection(pooled), dim=1)
