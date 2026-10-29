@@ -11,15 +11,15 @@ training:
   patch_size: 7
   batch_size: 128
   eval_batch_size: 512
-  eval_interval: 10
-  epochs: 120
+  eval_interval: 5
+  epochs: 60
   lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
   # source budget: 20% training labels + 18% validation (train+val total)
   source_train_ratio: 0.38
   source_budget_train_fraction: 0.526
-  steps_per_epoch: 20
+  steps_per_epoch: 40
   source_sampler_power: 1.0
   source_samples_per_class: 0
   target_train_max_samples: 30000
@@ -34,12 +34,12 @@ uda:
   # unified v6-compatible behaviour
   align_maturity_gate: false
   independent_target_reweight: false
-  anchor_freeze_epoch: 40
+  anchor_freeze_epoch: 20
   # unified schedule (absolute epochs, identical for all datasets)
-  pseudo_start_epoch: 40
-  pseudo_warm_epochs: 24
-  lmmd_start_epoch: 60
-  lmmd_warm_epochs: 20
+  pseudo_start_epoch: 20
+  pseudo_warm_epochs: 12
+  lmmd_start_epoch: 30
+  lmmd_warm_epochs: 10
   # unified pseudo-label gates
   pseudo_confidence: 0.95
   reliability_threshold: 0.45
@@ -61,7 +61,7 @@ uda:
   memory_update_start_epoch: 1
   # dataset-specific PRAT strength
   prat_style_max: 0.2
-  prat_warm_epochs: 55
+  prat_warm_epochs: 28
   # unified multi-prototype quotas
   cempa_class_cap: 24
   cempa_min_age: 2
