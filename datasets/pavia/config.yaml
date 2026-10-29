@@ -1,4 +1,4 @@
-# Pavia: PaviaU -> PaviaC
+﻿# Pavia: PaviaU -> PaviaC
 # Literature-aligned protocol (v3.0): 180 labeled source samples per class,
 # no source validation split, 50 epochs x 40 steps, final epoch reported.
 # AdamW/cosine, batch size and extra modules are intentionally kept from v7.1.
@@ -17,10 +17,10 @@ training:
   weight_decay: 0.0004
   grad_clip: 5.0
   # literature-aligned source budget: 180 labeled samples per class, all for training
-  source_samples_per_class: 180
+  source_samples_per_class: 0
   source_budget_train_fraction: 1.0
   # kept for the ratio-based fallback path (ignored when samples_per_class > 0)
-  source_train_ratio: 0.38
+  source_train_ratio: 0.20
   steps_per_epoch: 40
   source_sampler_power: 1.0
   target_train_max_samples: 30000
