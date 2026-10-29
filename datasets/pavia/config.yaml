@@ -8,7 +8,8 @@ dataset:
 training:
   patch_size: 7
   batch_size: 128
-  eval_batch_size: 256
+  eval_batch_size: 512
+  eval_interval: 20
   epochs: 110
   lr: 0.001
   # r23 protocol: 20% training labels + 18% validation (budget = train+val total)
@@ -32,8 +33,8 @@ uda:
   pseudo_start_epoch: 50
   pseudo_confidence: 0.95
   pseudo_warm_epochs: 30
-  # scheme B: rescue starved pseudo classes (Bitumen/Bricks often get 0)
-  pseudo_min_per_class: 2
+  # scheme B rolled back: quota added noisy pseudo labels, no class-level gain
+  pseudo_min_per_class: 0
   target_gt_mix_ratio: 0.0
   use_gt_target_mask: false
   lambda_cca: 0.5

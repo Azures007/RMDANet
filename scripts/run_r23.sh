@@ -7,6 +7,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${1:-C0}"
 SEED="${2:-1237}"
 OUT_ROOT="${3:-$ROOT/results_v71/r23}"
+WORKERS="${WORKERS:-4}"
 PAVIA_DATA="${PAVIA_DATA_ROOT:-/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets}"
 OTHER_DATA="${DATA_ROOT:-/root/autodl-tmp/Datasets}"
 
@@ -22,7 +23,7 @@ run_one() {
   local run="$OUT_ROOT/$ds/${MODE}_epochs${epochs}_seed${SEED}"
   echo "==================== ${ds^^} (${epochs} epochs) ===================="
   python -u scripts/run_v71.py "$ds" "$MODE" "$SEED" \
-    --data-root "$data_root" --epochs "$epochs" --out-root "$OUT_ROOT"
+    --data-root "$data_root" --epochs "$epochs" --workers "$WORKERS" --out-root "$OUT_ROOT"
   python -u scripts/final_eval_locked.py \
     --checkpoint "$run/selected_model.pt" \
     --data-path "$data_path" \

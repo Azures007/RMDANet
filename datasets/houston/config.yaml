@@ -9,7 +9,8 @@ dataset:
 training:
   patch_size: 17
   batch_size: 96
-  eval_batch_size: 192
+  eval_batch_size: 384
+  eval_interval: 20
   epochs: 280
   lr: 0.0003
   weight_decay: 0.0004
@@ -17,7 +18,7 @@ training:
   # r23 protocol: 20% training labels + 18% validation (budget = train+val total)
   source_train_ratio: 0.38
   source_budget_train_fraction: 0.526
-  target_train_max_samples: 50000
+  target_train_max_samples: 30000
   band_alignment_strength: 0.45
   ema_decay: 0.996
   label_smoothing: 0.035
@@ -34,8 +35,8 @@ uda:
   target_gt_mix_ratio: 0.0
   use_gt_target_mask: false
   pseudo_warm_epochs: 80
-  # scheme B: rescue starved pseudo classes
-  pseudo_min_per_class: 2
+  # scheme B rolled back
+  pseudo_min_per_class: 0
   pseudo_confidence: 0.90
   reliability_threshold: 0.48
   cempa_class_cap: 40

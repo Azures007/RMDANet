@@ -6,7 +6,8 @@ dataset:
 training:
   patch_size: 7
   batch_size: 128
-  eval_batch_size: 256
+  eval_batch_size: 512
+  eval_interval: 20
   epochs: 60
   lr: 0.001
   weight_decay: 0.0004
@@ -32,8 +33,8 @@ uda:
   pseudo_start_epoch: 40
   lmmd_start_epoch: 60
   pseudo_warm_epochs: 30
-  # scheme B: rescue starved pseudo classes (class 5/9/10)
-  pseudo_min_per_class: 2
+  # scheme B rolled back
+  pseudo_min_per_class: 0
   pseudo_confidence: 0.95
   reliability_threshold: 0.40
   target_gt_mix_ratio: 0.0
