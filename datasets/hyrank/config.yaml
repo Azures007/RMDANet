@@ -1,4 +1,4 @@
-# HyRANK: Dioni -> Loukia
+﻿# HyRANK: Dioni -> Loukia
 # Literature-aligned protocol (v3.0): 180 labeled source samples per class,
 # no source validation split, 50 epochs x 40 steps, final epoch reported.
 # AdamW/cosine, batch size and extra modules are intentionally kept from v7.1.
@@ -35,7 +35,9 @@ uda:
   align_maturity_gate: false
   independent_target_reweight: false
   # no source validation -> report the final epoch (literature-aligned)
-  select_final_epoch: true
+  # pick the epoch with the best label-free reliability score (no target labels)
+  select_mode: label_free
+  select_final_epoch: false
   # schedule scaled to 50 epochs (proportional to the 60-epoch v2.2b schedule)
   anchor_freeze_epoch: 17
   pseudo_start_epoch: 17

@@ -284,6 +284,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Literature-aligned protocol: report the final epoch instead of "
              "label-free checkpoint selection (pair with an empty source validation split).",
     )
+    parser.add_argument(
+        "--select_mode",
+        type=str,
+        default="",
+        choices=["", "final", "label_free"],
+        help="Checkpoint selection: 'final' = last epoch, 'label_free' = pick the "
+             "epoch with the best label-free reliability score (no source "
+             "validation, no target labels). Empty = legacy behaviour.",
+    )
     parser.add_argument("--checkpoint_average", type=int, default=1)
     parser.add_argument("--final_tta", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--skip_final_evaluation", action=argparse.BooleanOptionalAction, default=False)
@@ -1929,9 +1938,16 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             )
 
         if epoch % args.eval_interval == 0 or epoch == args.epochs:
-            final_epoch_protocol = bool(
-                getattr(args, "select_final_epoch", False)
-            ) or loaders["source_validation_loader"] is None
+            select_mode = str(getattr(args, "select_mode", "") or "")
+            if select_mode == "final":
+                final_epoch_protocol, label_free_only = True, False
+            elif select_mode == "label_free":
+                final_epoch_protocol, label_free_only = False, True
+            else:
+                final_epoch_protocol = bool(
+                    getattr(args, "select_final_epoch", False)
+                ) or loaders["source_validation_loader"] is None
+                label_free_only = False
             if final_epoch_protocol:
                 # Literature-aligned protocol: no source validation split, the
                 # final epoch is reported. Diagnostics are kept for the log only.
@@ -1939,6 +1955,18 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
                 source_teacher = 0.0
                 score = 0.0
                 diagnostics = memory.unsupervised_diagnostics()
+            elif label_free_only:
+                # Hide no labels at all: the checkpoint is chosen by the label-free
+                # reliability score only (memory diagnostics + target consistency).
+                source_student = 0.0
+                source_teacher = 0.0
+                diagnostics = memory.unsupervised_diagnostics()
+                target_consistency = target_consistency_score(
+                    teacher, loaders["target_fit_loader"], device
+                )
+                score = label_free_selection_score(
+                    0.0, diagnostics, metrics["selected"], target_consistency
+                )
             else:
                 source_student = evaluate_source(
                     student, loaders["source_validation_loader"], device
