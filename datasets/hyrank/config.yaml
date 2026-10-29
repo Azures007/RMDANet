@@ -1,7 +1,7 @@
 ﻿# HyRANK: Dioni -> Loukia
 # Literature-aligned protocol (v3.0): 180 labeled source samples per class,
 # no source validation split, 50 epochs x 40 steps, final epoch reported.
-# AdamW/cosine, batch size and extra modules are intentionally kept from v7.1.
+# SGD momentum 0.9 + cosine lr; batch 128 and extra modules are kept from v7.1.
 dataset:
   source_name: Dioni
   target_name: Loukia
@@ -13,9 +13,12 @@ training:
   eval_batch_size: 512
   eval_interval: 5
   epochs: 50
-  lr: 0.001
+  lr: 0.1
   weight_decay: 0.0004
   grad_clip: 5.0
+  # SGD momentum 0.9 with cosine lr (literature-style optimizer; batch kept at 128)
+  optimizer_type: sgd
+  constant_lr: false
   # literature-aligned source budget: 180 labeled samples per class, all used for training
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
