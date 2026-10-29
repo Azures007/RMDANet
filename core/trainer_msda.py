@@ -84,6 +84,11 @@ def train(args) -> dict:
         f"cuda:{args.gpu}" if torch.cuda.is_available() and args.gpu >= 0 else "cpu"
     )
     set_seed(args.seed, bool(getattr(args, "deterministic", False)))
+    # The official SSSE backbone uses AvgPool3d, whose CUDA backward has no
+    # deterministic implementation.  Keep determinism for everything else and
+    # only fall back to "warn" mode for such ops (the official code runs fully
+    # non-deterministic, so this is stricter than the reference).
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
     run_dir = Path(args.save_path)
     run_dir.mkdir(parents=True, exist_ok=True)
