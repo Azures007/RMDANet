@@ -23,6 +23,13 @@ from trainer import (
 from trainer_msda import load_official
 
 
+def _unpack(output):
+    """Official models return either tensors or (logits, features) tuples."""
+    if isinstance(output, (tuple, list)):
+        return output[0]
+    return output
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -83,8 +90,16 @@ def main() -> None:
     with torch.no_grad():
         for x, labels in loader:
             x = x.to(device, non_blocking=True)
-            features = backbone(x)
-            logits = 0.5 * (f1(features)[0] + f2(features)[0])
+            features = _unpack(backbone(x))
+            logits1 = _unpack(f1(features))
+            logits2 = _unpack(f2(features))
+            if logits1.dim() == 1:
+                logits1 = logits1.unsqueeze(0)
+            if logits2.dim() == 1:
+                logits2 = logits2.unsqueeze(0)
+            logits = 0.5 * (logits1.float() + logits2.float())
+            if logits.dim() > 2:
+                logits = logits.reshape(logits.size(0), -1)
             preds_all.append(logits.argmax(dim=1).cpu().numpy())
             labels_all.append(labels.numpy())
     target_labels = np.concatenate(labels_all)
