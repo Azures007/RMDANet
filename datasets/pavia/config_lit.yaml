@@ -15,7 +15,7 @@ training:
   weight_decay: 0.0005
   grad_clip: 5.0
   optimizer_type: sgd
-  constant_lr: false
+  constant_lr: true
   # literature input normalization: per-band z-score (keeps relative magnitude)
   input_normalization: band
   # literature source budget: 180 labeled samples per class, no validation split
@@ -45,7 +45,7 @@ uda:
   lit_pseudo_start: 10
   lit_pseudo_ramp: 15
   lit_pseudo_weight: 0.10
-  lit_discrepancy_weight: 3.0
+  lit_discrepancy_weight: 2.0
   lit_discrepancy_ramp: 10
   lit_bnm_weight: 0.15
   lit_bnm_start: 5
