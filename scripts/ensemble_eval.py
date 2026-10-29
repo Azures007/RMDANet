@@ -152,6 +152,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Locked ensemble of two checkpoints")
     parser.add_argument("--checkpoint-a", required=True, help="main-branch reliability model")
     parser.add_argument("--checkpoint-b", required=True, help="lit-recipe model")
+    parser.add_argument("--checkpoint-c", default="", help="optional third reliability model")
+    parser.add_argument("--weight-c", type=float, default=0.0)
     parser.add_argument("--data-path", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--weight-a", type=float, default=0.5)
@@ -182,6 +184,18 @@ def main() -> None:
     loader_b = build_target_evaluation_loader(args_b, aligned_b)
     probs_a, labels_a = _reliability_probabilities(model_a, loader_a, device, tta=options.tta)
     probs_b, labels_b = _lit_probabilities(backbone_b, f1_b, f2_b, loader_b, device, tta=options.tta)
+    probs_c = None
+    weight_c = float(np.clip(options.weight_c, 0.0, 0.9))
+    if options.checkpoint_c:
+        checkpoint_c = _load(Path(options.checkpoint_c))
+        args_c, model_c, aligned_c = _reliability_model(checkpoint_c, options.data_path, device)
+        loader_c = build_target_evaluation_loader(args_c, aligned_c)
+        probs_c, labels_c = _reliability_probabilities(model_c, loader_c, device, tta=options.tta)
+        if not np.array_equal(labels_a, labels_c):
+            raise RuntimeError("Third model produced a different target sample set.")
+        print("[ENSEMBLE] C:", options.checkpoint_c)
+    else:
+        weight_c = 0.0
     if probs_a.shape[0] != probs_b.shape[0] or not np.array_equal(labels_a, labels_b):
         raise RuntimeError(
             "The two preprocessing pipelines produced different target sample sets."
@@ -189,6 +203,10 @@ def main() -> None:
 
     weight_a = float(np.clip(options.weight_a, 0.0, 1.0))
     probs_ensemble = weight_a * probs_a + (1.0 - weight_a) * probs_b
+    if probs_c is not None and weight_c > 0.0:
+        probs_ensemble = (
+            weight_a * probs_a + (1.0 - weight_a - weight_c) * probs_b + weight_c * probs_c
+        )
     num_classes = int(args_a.num_classes)
     metrics_a = _metrics(labels_a, probs_a, num_classes)
     metrics_b = _metrics(labels_a, probs_b, num_classes)
