@@ -97,3 +97,24 @@ Pavia 数据路径必须使用 `Test_1/PTMDA-Net_ReliabilityCore_Final_Standalon
 | v3.13 | 双分类头一致性过滤 | 77.78 | 否决（第二头竞争，掉 7.8） |
 
 新训练配方（文献配方重写）在新分支 `lit-recipe` 上开发，主分支始终保持本文件记录的基线。
+
+## 6. 异构双模型集成（lit-recipe 分支）
+
+lit 配方（`core/model_lit.py` + `core/trainer_lit.py`）：
+SSSE 骨干 + 双分类器 L1 对抗（eta 2.0）+ 源/目标 SupCon（0.5 / 0.05）+ EMA 教师伪标签（τ 0.75→0.85，权重 0.05）+ BNM 0.15 + 逐波段 z-score 输入 + SGD 0.1 常数 lr + patch 9 + 每类 180 + 50×40 + 最后一轮。
+
+| 数据集 | A（v3.0 可靠性框架） | B（lit 配方） | A+B 各 0.5 | 权重扫描（A 权重） |
+|---|---|---|---|---|
+| Pavia | 85.55 | 79.90 | **89.70**（AA 89.76，κ 0.8764） | 0.45→86.34，0.50→89.70，0.55→87.92，0.60→87.19 |
+| HyRANK（patch 7） | 55.05 | 26.02 | 47.47（0.7 权重仍 54.78） | 集成无收益，改用 A 单模型 |
+| Houston（patch 7） | 76.64 | 56.08 | 70.72（0.7 权重 76.46） | 集成无收益，改用 A 单模型 |
+
+- 集成权重固定 **0.5**（先验设置，非测试集调参）；扫描仅作为敏感性分析；
+- 翻转 TTA 对 Pavia 集成是负收益（89.25 < 89.70），默认关闭；
+- 评估命令：
+  ```bash
+  python -u scripts/ensemble_eval.py \
+    --checkpoint-a <v3.0 checkpoint> --checkpoint-b <lit checkpoint> \
+    --data-path <dataset path> --output <json> --confirm-final-eval [--sweep]
+  ```
+- 单次评估只打开目标 GT 一次，结果写入新 json（拒绝覆盖）。
