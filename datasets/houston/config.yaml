@@ -1,27 +1,29 @@
-﻿# Houston: Houston13 -> Houston18
-# Unified protocol v2: same modules / same schedule / same epochs for all datasets.
-# Per-dataset numeric hyperparameters are limited to: patch_size, lr, band_alignment_strength,
-# prat_style_max (dataset-specific PRAT strength) and target_train_max_samples.
+# Houston: Houston13 -> Houston18
+# Literature-aligned protocol (v3.0): 180 labeled source samples per class,
+# no source validation split, 50 epochs x 40 steps, final epoch reported.
+# Patch size aligned with the HSI-UDA literature (7x7).
+# AdamW/cosine, batch size and extra modules are intentionally kept from v7.1.
 dataset:
   source_name: Houston13
   target_name: Houston18
   num_classes: 7
 
 training:
-  patch_size: 17
+  patch_size: 7
   batch_size: 128
   eval_batch_size: 512
   eval_interval: 5
-  epochs: 60
+  epochs: 50
   lr: 0.0003
   weight_decay: 0.0004
   grad_clip: 5.0
-  # source budget: 10% training labels + 18% validation (train+val total)
-  source_train_ratio: 0.28
-  source_budget_train_fraction: 0.357
-  steps_per_epoch: 30
+  # literature-aligned source budget: 180 labeled samples per class, all for training
+  source_samples_per_class: 180
+  source_budget_train_fraction: 1.0
+  # kept for the ratio-based fallback path (ignored when samples_per_class > 0)
+  source_train_ratio: 0.38
+  steps_per_epoch: 40
   source_sampler_power: 1.0
-  source_samples_per_class: 0
   target_train_max_samples: 30000
   band_alignment_strength: 0.45
   ema_decay: 0.996
@@ -31,21 +33,22 @@ training:
 
 uda:
   ablation_id: full
-  # unified v6-compatible behaviour
   align_maturity_gate: false
   independent_target_reweight: false
-  anchor_freeze_epoch: 20
-  # unified schedule (absolute epochs, identical for all datasets)
-  pseudo_start_epoch: 20
-  pseudo_warm_epochs: 12
-  lmmd_start_epoch: 30
-  lmmd_warm_epochs: 10
-  # unified pseudo-label gates
+  # no source validation -> report the final epoch (literature-aligned)
+  select_final_epoch: true
+  # schedule scaled to 50 epochs (proportional to the 60-epoch v2.2b schedule)
+  anchor_freeze_epoch: 17
+  pseudo_start_epoch: 17
+  pseudo_warm_epochs: 10
+  lmmd_start_epoch: 25
+  lmmd_warm_epochs: 8
+  # pseudo-label gates
   pseudo_confidence: 0.95
   reliability_threshold: 0.45
   pseudo_margin: 0.10
   pseudo_min_per_class: 0
-  # unified module set: CCA + CORAL + LMMD + prototype alignment
+  # module set: CCA + CORAL + LMMD + prototype alignment
   lambda_cca: 0.5
   cca_start_epoch: 0
   cca_temperature: 0.10
@@ -61,8 +64,8 @@ uda:
   memory_update_start_epoch: 1
   # dataset-specific PRAT strength
   prat_style_max: 0.64
-  prat_warm_epochs: 28
-  # unified multi-prototype quotas
+  prat_warm_epochs: 23
+  # multi-prototype quotas
   cempa_class_cap: 24
   cempa_min_age: 2
   cempa_min_streak: 2

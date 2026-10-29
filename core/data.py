@@ -250,8 +250,8 @@ def budgeted_source_split(ground_truth: np.ndarray, total_budget_ratio: float,
     and validation use disjoint SOURCE coordinates. All excluded pixels become
     unlabeled zeros and never reach either source loader.
     """
-    if not 0 < train_fraction < 1:
-        raise ValueError("train_fraction must lie strictly in (0,1)")
+    if not 0 < train_fraction <= 1:
+        raise ValueError("train_fraction must lie in (0,1]")
     if samples_per_class <= 0 and not 0 < total_budget_ratio <= 1:
         raise ValueError("total_budget_ratio must be in (0,1]")
     rng = np.random.default_rng(seed)
@@ -266,7 +266,12 @@ def budgeted_source_split(ground_truth: np.ndarray, total_budget_ratio: float,
         if budget < 2:
             raise ValueError(f"class {class_id}: source label budget {budget} is too small for "
                              "disjoint train+validation; increase budget")
-        ntrain = min(budget - 1, max(1, round(budget * train_fraction)))
+        if train_fraction >= 1.0:
+            # Literature-aligned protocol: the whole budget is used for training
+            # and the source validation split is empty.
+            ntrain = budget
+        else:
+            ntrain = min(budget - 1, max(1, round(budget * train_fraction)))
         a, b = coordinates[:ntrain], coordinates[ntrain:budget]
         train[a[:,0],a[:,1]] = class_id
         validation[b[:,0],b[:,1]] = class_id

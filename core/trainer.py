@@ -263,6 +263,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval_interval", type=int, default=10)
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--checkpoint_topk", type=int, default=5)
+    parser.add_argument(
+        "--select_final_epoch",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Literature-aligned protocol: report the final epoch instead of "
+             "label-free checkpoint selection (pair with an empty source validation split).",
+    )
     parser.add_argument("--checkpoint_average", type=int, default=1)
     parser.add_argument("--final_tta", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--skip_final_evaluation", action=argparse.BooleanOptionalAction, default=False)
@@ -930,12 +937,16 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         labels=source_train_labels,
         augment=True,
     )
-    source_validation_dataset = PatchDataset(
-        source_scene.image,
-        source_validation_coordinates,
-        patch_size=args.patch_size,
-        labels=source_validation_labels,
-        augment=False,
+    source_validation_dataset = (
+        PatchDataset(
+            source_scene.image,
+            source_validation_coordinates,
+            patch_size=args.patch_size,
+            labels=source_validation_labels,
+            augment=False,
+        )
+        if len(source_validation_coordinates) > 0
+        else None
     )
     target_dataset = PatchDataset(
         target_image,
@@ -996,11 +1007,15 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         "pin_memory": device.type == "cuda",
         "worker_init_fn": seed_worker,
     }
-    source_validation_loader = data.DataLoader(
-        source_validation_dataset,
-        batch_size=args.eval_batch_size,
-        shuffle=False,
-        **eval_kwargs,
+    source_validation_loader = (
+        data.DataLoader(
+            source_validation_dataset,
+            batch_size=args.eval_batch_size,
+            shuffle=False,
+            **eval_kwargs,
+        )
+        if source_validation_dataset is not None
+        else None
     )
     target_fit_loader = data.DataLoader(
         target_dataset,
@@ -1618,8 +1633,8 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("v7.1 requires locked independent final evaluation")
     if args.dual_head_filter and args.lambda_dual_source <= 0:
         raise ValueError("dual_head_filter requires supervised classifier2: --lambda-dual-source > 0")
-    if not 0.0 < float(args.source_budget_train_fraction) < 1.0:
-        raise ValueError("source_budget_train_fraction must be between 0 and 1")
+    if not 0.0 < float(args.source_budget_train_fraction) <= 1.0:
+        raise ValueError("source_budget_train_fraction must be in (0, 1]")
     set_seed(args.seed, args.deterministic)
     if not torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device("cpu")
@@ -1843,19 +1858,30 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             )
 
         if epoch % args.eval_interval == 0 or epoch == args.epochs:
-            source_student = evaluate_source(
-                student, loaders["source_validation_loader"], device
-            )
-            source_teacher = evaluate_source(
-                teacher, loaders["source_validation_loader"], device
-            )
-            diagnostics = memory.unsupervised_diagnostics()
-            target_consistency = target_consistency_score(
-                teacher, loaders["target_fit_loader"], device
-            )
-            score = label_free_selection_score(
-                source_teacher, diagnostics, metrics["selected"], target_consistency
-            )
+            final_epoch_protocol = bool(
+                getattr(args, "select_final_epoch", False)
+            ) or loaders["source_validation_loader"] is None
+            if final_epoch_protocol:
+                # Literature-aligned protocol: no source validation split, the
+                # final epoch is reported. Diagnostics are kept for the log only.
+                source_student = 0.0
+                source_teacher = 0.0
+                score = 0.0
+                diagnostics = memory.unsupervised_diagnostics()
+            else:
+                source_student = evaluate_source(
+                    student, loaders["source_validation_loader"], device
+                )
+                source_teacher = evaluate_source(
+                    teacher, loaders["source_validation_loader"], device
+                )
+                diagnostics = memory.unsupervised_diagnostics()
+                target_consistency = target_consistency_score(
+                    teacher, loaders["target_fit_loader"], device
+                )
+                score = label_free_selection_score(
+                    source_teacher, diagnostics, metrics["selected"], target_consistency
+                )
             record = {
                 "epoch": epoch,
                 "score": float(score),
@@ -1865,19 +1891,29 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
                 "state": state_dict_to_cpu(teacher),
             }
             candidates.append(record)
-            candidates = sorted(candidates, key=lambda item: item["score"], reverse=True)[
-                : args.checkpoint_topk
-            ]
-            print(
-                "  label-free selection: "
-                f"source(student/teacher)={source_student:.2f}/{source_teacher:.2f} "
-                f"score={score:.3f} reliability={diagnostics['reliability']:.3f} "
-                f"coverage={diagnostics['coverage']:.3f} "
-                f"prototype={diagnostics['prototype_coverage']:.3f} "
-                f"entropy={diagnostics['entropy']:.3f} "
-                f"pseudo_peak={diagnostics.get('pseudo_peak', 0.0):.3f} "
-                f"best_epoch={candidates[0]['epoch']}"
-            )
+            if final_epoch_protocol:
+                candidates = [record]
+                print(
+                    f"  final-epoch protocol: epoch={epoch} "
+                    f"reliability={diagnostics['reliability']:.3f} "
+                    f"coverage={diagnostics['coverage']:.3f} "
+                    f"entropy={diagnostics['entropy']:.3f} "
+                    "(no source validation; final epoch reported)"
+                )
+            else:
+                candidates = sorted(
+                    candidates, key=lambda item: item["score"], reverse=True
+                )[: args.checkpoint_topk]
+                print(
+                    "  label-free selection: "
+                    f"source(student/teacher)={source_student:.2f}/{source_teacher:.2f} "
+                    f"score={score:.3f} reliability={diagnostics['reliability']:.3f} "
+                    f"coverage={diagnostics['coverage']:.3f} "
+                    f"prototype={diagnostics['prototype_coverage']:.3f} "
+                    f"entropy={diagnostics['entropy']:.3f} "
+                    f"pseudo_peak={diagnostics.get('pseudo_peak', 0.0):.3f} "
+                    f"best_epoch={candidates[0]['epoch']}"
+                )
             if hasattr(memory, "flip_diagnostics"):
                 flip_stats = memory.flip_diagnostics()
                 if epoch % 10 == 0 or epoch == args.epochs:
