@@ -34,10 +34,11 @@ def load_official(msda_dir: str | None = None):
     if directory not in sys.path:
         sys.path.insert(0, directory)
     from HybridSN import SSSE_test  # type: ignore
-    from basenet import ResClassifier, weights_init  # type: ignore
+    from basenet import ResClassifier  # type: ignore
     from modules.masking import Masking_new  # type: ignore
     from modules.mcc import MinimumClassConfusionLoss  # type: ignore
     from modules.teacher import EMATeacher  # type: ignore
+    from utils import weights_init  # type: ignore
 
     return {
         "SSSE_test": SSSE_test,
