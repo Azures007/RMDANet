@@ -27,6 +27,8 @@ class SceneData:
     image: np.ndarray
     ground_truth: np.ndarray | None
     class_names: list[str]
+    # Per-pixel log spectral magnitude, standardized per scene (label-free).
+    amplitude: np.ndarray | None = None
 
 
 def _load_mat(path: Path) -> dict:
@@ -117,6 +119,30 @@ def robust_scene_normalize(image: np.ndarray, mode: str = "l2") -> np.ndarray:
     return np.asarray(image, dtype=np.float32)
 
 
+def compute_log_amplitude(image: np.ndarray) -> np.ndarray:
+    """Per-pixel log spectral magnitude, robustly standardized per scene.
+
+    Per-pixel L2 normalization removes magnitude, which is the only cue that
+    separates near-parallel spectra (Pavia Bitumen / Bricks / BareSoil).
+    The map is computed from the RAW spectrum, then centered by the scene
+    median and scaled by the MAD so source and target become comparable.
+    No labels are used.
+    """
+    image = np.asarray(image, dtype=np.float32)
+    valid = _valid_pixel_mask(image)
+    if not valid.any():
+        raise ValueError("The scene contains no finite non-zero spectra.")
+    norms = np.linalg.norm(np.nan_to_num(image, copy=False), axis=-1)
+    amplitude = np.log(np.maximum(norms, 1e-6))
+    values = amplitude[valid]
+    center = float(np.median(values))
+    mad = float(np.median(np.abs(values - center)))
+    scale = max(1.4826 * mad, 1e-3)
+    amplitude = (amplitude - center) / scale
+    amplitude[~valid] = 0.0
+    return np.clip(amplitude, -5.0, 5.0).astype(np.float32)
+
+
 def align_target_bands(
     source_image: np.ndarray,
     target_image: np.ndarray,
@@ -188,8 +214,10 @@ def load_source_scene(data_path: str | Path, name: str = "Houston13", num_classe
         raise ValueError(
             f"Source image and label shapes differ: {image.shape[:2]} vs {ground_truth.shape}."
         )
+    amplitude = compute_log_amplitude(image)
     image = robust_scene_normalize(image, mode=normalize_mode)
-    return SceneData(image=image, ground_truth=ground_truth, class_names=HOUSTON_CLASS_NAMES.copy())
+    return SceneData(image=image, ground_truth=ground_truth,
+                     class_names=HOUSTON_CLASS_NAMES.copy(), amplitude=amplitude)
 
 
 def load_target_image_only(data_path: str | Path, name: str = "Houston18", normalize_mode: str = "l2") -> SceneData:
@@ -199,8 +227,11 @@ def load_target_image_only(data_path: str | Path, name: str = "Houston18", norma
         image = load_whu_image(str(root), name)
         image = robust_scene_normalize(image, mode=normalize_mode)
         return SceneData(image=image, ground_truth=None, class_names=[])
-    image = robust_scene_normalize(_read_mat_image(root / f"{name}.mat"), mode=normalize_mode)
-    return SceneData(image=image, ground_truth=None, class_names=HOUSTON_CLASS_NAMES.copy())
+    raw_image = _read_mat_image(root / f"{name}.mat")
+    amplitude = compute_log_amplitude(raw_image)
+    image = robust_scene_normalize(raw_image, mode=normalize_mode)
+    return SceneData(image=image, ground_truth=None,
+                     class_names=HOUSTON_CLASS_NAMES.copy(), amplitude=amplitude)
 
 
 def load_target_ground_truth_only(data_path: str | Path, name: str = "Houston18", num_classes: int = 7) -> np.ndarray:

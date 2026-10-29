@@ -43,10 +43,16 @@ def main():
     target=load_target_image_only(t.data_path,t.target_name,normalize_mode=mode)
     aligned,_=align_target_bands(src.image,target.image,strength=t.band_alignment_strength,
                                   renormalize=mode!='median')
-    model=DualReliabilityEncoder(bands=src.image.shape[-1],num_classes=t.num_classes,
+    amplitude_input=bool(getattr(t,'amplitude_input',False))
+    if amplitude_input:
+        if target.amplitude is None:
+            raise RuntimeError('amplitude_input requires a target amplitude map')
+        aligned=np.concatenate([aligned,target.amplitude[...,None]],axis=-1)
+    model=DualReliabilityEncoder(bands=aligned.shape[-1],num_classes=t.num_classes,
        projection_dim=t.projection_dim,projection_norm=t.projection_norm,
        aspp_mode=t.aspp_mode,pooling_mode=t.pooling_mode,
        spectral_fusion_mode=t.spectral_fusion_mode,amplitude_channel=t.amplitude_channel,
+       amplitude_input=amplitude_input,
        enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0)).to(device)
     model.load_state_dict(checkpoint['model'],strict=True);model.eval()
     print('[FINAL EVAL] Loading TARGET GT NOW for reporting ONLY')

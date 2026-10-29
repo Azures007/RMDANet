@@ -37,14 +37,16 @@ training:
 uda:
   ablation_id: full
   align_maturity_gate: false
+  # scheme A: per-pixel log-magnitude input channel (spectral shape kept)
+  amplitude_input: true
   independent_target_reweight: false
   # no source validation -> report the final epoch (literature-aligned)
   select_final_epoch: true
   # schedule scaled to 50 epochs (proportional to the 60-epoch v2.2b schedule)
-  anchor_freeze_epoch: 8
-  pseudo_start_epoch: 8
+  anchor_freeze_epoch: 17
+  pseudo_start_epoch: 17
   pseudo_warm_epochs: 10
-  lmmd_start_epoch: 15
+  lmmd_start_epoch: 25
   lmmd_warm_epochs: 8
   # pseudo-label gates
   pseudo_confidence: 0.95

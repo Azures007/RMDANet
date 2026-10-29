@@ -383,11 +383,16 @@ class DualReliabilityEncoder(nn.Module):
         pooling_mode: str = "guided",
         spectral_fusion_mode: str = "reliable",
         amplitude_channel: bool = False,
+        amplitude_input: bool = False,
         enable_dual_head: bool = False,
     ) -> None:
         super().__init__()
         self.enable_dual_head = bool(enable_dual_head)
-        self.bands = int(bands)
+        # When amplitude_input is on the input cube carries one extra trailing
+        # channel (per-pixel log magnitude); the spectral encoders keep seeing
+        # only the real spectral bands.
+        self.amplitude_input = bool(amplitude_input)
+        self.bands = int(bands) - (1 if self.amplitude_input else 0)
         self.num_classes = int(num_classes)
         self.projection_dim = int(projection_dim)
         self.aspp_mode = aspp_mode
@@ -420,6 +425,23 @@ class DualReliabilityEncoder(nn.Module):
         self.spectral_encoder = CenterSpectralShapeEncoder(
             self.bands, self.projection_dim, amplitude=self.amplitude_channel
         )
+        self.amplitude_encoder: nn.Module | None = None
+        self.amplitude_gate: nn.Parameter | None = None
+        if self.amplitude_input:
+            self.amplitude_encoder = nn.Sequential(
+                nn.Conv2d(1, 16, 3, padding=1),
+                nn.GroupNorm(4, 16),
+                nn.SiLU(inplace=True),
+                nn.Conv2d(16, 32, 3, padding=1),
+                nn.GroupNorm(8, 32),
+                nn.SiLU(inplace=True),
+                nn.AdaptiveAvgPool2d(1),
+                nn.Flatten(),
+                nn.Linear(32, self.projection_dim),
+            )
+            nn.init.zeros_(self.amplitude_encoder[-1].weight)
+            nn.init.zeros_(self.amplitude_encoder[-1].bias)
+            self.amplitude_gate = nn.Parameter(torch.zeros(1))
         self.classifier = CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
         self.classifier2 = (CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
                             if self.enable_dual_head else None)
@@ -449,6 +471,10 @@ class DualReliabilityEncoder(nn.Module):
             self.spectral_fusion.gate[-1].bias,
             math.log(init_gate / (1.0 - init_gate)),
         )
+        if self.amplitude_encoder is not None:
+            # Start from "no amplitude contribution" and let the gate open it.
+            nn.init.zeros_(self.amplitude_encoder[-1].weight)
+            nn.init.zeros_(self.amplitude_encoder[-1].bias)
 
     def classify_features(self, features: torch.Tensor) -> torch.Tensor:
         return self.classifier(features)
@@ -456,18 +482,33 @@ class DualReliabilityEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> ModelOutput:
         if x.ndim != 4:
             raise ValueError("Expected input shape [batch, bands, height, width].")
-        features3d = self.local3d(x)
+        if self.amplitude_input:
+            if x.size(1) != self.bands + 1:
+                raise ValueError(
+                    f"amplitude_input expects {self.bands + 1} channels, got {x.size(1)}."
+                )
+            spectral_x = x[:, :-1]
+            amplitude_x = x[:, -1:]
+        else:
+            spectral_x = x
+            amplitude_x = None
+        features3d = self.local3d(spectral_x)
         spatial = features3d.mean(dim=2)
         spatial = self.semantic2d(spatial)
         spatial, scale_weights = self.micro_aspp(spatial)
         pooled, center_weights, attention_map = self.pool(spatial)
         context_features = F.normalize(self.projection(pooled), dim=1)
-        spectral_features = self.spectral_encoder(x)
+        spectral_features = self.spectral_encoder(spectral_x)
         context_logits = self.classifier(context_features)
         spectral_logits = self.classifier(spectral_features)
         features, _, spectral_reliability = self.spectral_fusion(
             context_features, spectral_features, context_logits, spectral_logits
         )
+        if amplitude_x is not None and self.amplitude_encoder is not None:
+            amplitude_features = self.amplitude_encoder(amplitude_x)
+            features = F.normalize(
+                features + torch.tanh(self.amplitude_gate) * amplitude_features, dim=1
+            )
         logits = self.classifier(features)
         logits2 = self.classifier2(features) if self.classifier2 is not None else None
         return ModelOutput(

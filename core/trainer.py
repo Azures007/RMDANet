@@ -291,6 +291,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run_name", type=str, default="")
     parser.add_argument("--diagnostic_target_oa", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--amplitude_channel", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument(
+        "--amplitude_input",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Append a per-pixel log-magnitude map as an extra input channel "
+             "(spectral shape is kept, unlike --amplitude_channel).",
+    )
     parser.add_argument("--config", type=str, default="", help="YAML config file path")
     parser.add_argument("--use_early_target_adaptation", action=argparse.BooleanOptionalAction, default=False, help="Memory update from epoch 1 (was hardcoded for Pavia)")
     return parser
@@ -893,6 +900,18 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         strength=args.band_alignment_strength,
         renormalize=normalize_mode != "median",
     )
+    if getattr(args, "amplitude_input", False):
+        if source_scene.amplitude is None or target_scene.amplitude is None:
+            raise ValueError("amplitude_input requires per-scene amplitude maps")
+        # Trailing channel: standardized log spectral magnitude (label-free).
+        source_image = np.concatenate(
+            [source_scene.image, source_scene.amplitude[..., None]], axis=-1
+        )
+        target_image = np.concatenate(
+            [target_image, target_scene.amplitude[..., None]], axis=-1
+        )
+    else:
+        source_image = source_scene.image
 
     if getattr(args, "strict_source_budget", True):
         from data import budgeted_source_split
@@ -923,7 +942,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     # num_classes is the number of valid classes after subtracting background (0)
     # Labels are 1-N in ground truth, 0-(N-1) after -1, so max of ground truth gives N
     num_classes = int(source_scene.ground_truth.max())
-    bands = int(source_scene.image.shape[-1])
+    bands = int(source_image.shape[-1])
 
     target_mask_full = np.linalg.norm(target_image, axis=-1) > 0
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0.0)) != 0.0:
@@ -945,7 +964,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     )
 
     source_train_dataset = PatchDataset(
-        source_scene.image,
+        source_image,
         source_train_coordinates,
         patch_size=args.patch_size,
         labels=source_train_labels,
@@ -953,7 +972,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     )
     source_validation_dataset = (
         PatchDataset(
-            source_scene.image,
+            source_image,
             source_validation_coordinates,
             patch_size=args.patch_size,
             labels=source_validation_labels,
@@ -1180,7 +1199,17 @@ def run_epoch(
 
         with torch.no_grad():
             if args.use_prat:
-                styled_source, prat_metadata = prat(source_x, target_x, style_strength)
+                if bool(getattr(args, "amplitude_input", False)):
+                    # PRAT transfers spectral style; the amplitude channel is
+                    # not part of the spectrum and is re-attached afterwards.
+                    styled_spectral, prat_metadata = prat(
+                        source_x[:, :-1], target_x[:, :-1], style_strength
+                    )
+                    styled_source = torch.cat(
+                        [styled_spectral, source_x[:, -1:]], dim=1
+                    )
+                else:
+                    styled_source, prat_metadata = prat(source_x, target_x, style_strength)
                 if feedback_enabled and feedback is not None:
                     class_scale = feedback.scale_prat[source_y].view(-1, 1, 1, 1)
                     styled_source = source_x + (styled_source - source_x) * class_scale
@@ -1724,6 +1753,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         pooling_mode=args.pooling_mode,
         spectral_fusion_mode=args.spectral_fusion_mode,
         amplitude_channel=args.amplitude_channel,
+        amplitude_input=bool(getattr(args, "amplitude_input", False)),
         enable_dual_head=(args.dual_head_filter or args.lambda_dual_source > 0),
     ).to(device)
     teacher = copy.deepcopy(student).to(device)
@@ -1732,8 +1762,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     for parameter in teacher.parameters():
         parameter.requires_grad_(False)
 
+    spectral_bands = int(loaders["bands"]) - (
+        1 if bool(getattr(args, "amplitude_input", False)) else 0
+    )
     prat = PhaseReliabilityResidualAmplitudeTransfer(
-        bands=loaders["bands"],
+        bands=spectral_bands,
         patch_size=args.patch_size,
         ema_momentum=args.prat_ema_momentum,
         low_frequency_ratio=args.prat_low_frequency_ratio,
