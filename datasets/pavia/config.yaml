@@ -1,4 +1,4 @@
-# Pavia: PaviaU -> PaviaC
+﻿# Pavia: PaviaU -> PaviaC
 # Unified protocol v2: same modules / same schedule / same epochs for all datasets.
 # Per-dataset numeric hyperparameters are limited to: patch_size, lr, band_alignment_strength,
 # prat_style_max (dataset-specific PRAT strength) and target_train_max_samples.
@@ -38,8 +38,8 @@ uda:
   # unified schedule (absolute epochs, identical for all datasets)
   pseudo_start_epoch: 40
   pseudo_warm_epochs: 24
-  lmmd_start_epoch: 40
-  lmmd_warm_epochs: 24
+  lmmd_start_epoch: 60
+  lmmd_warm_epochs: 20
   # unified pseudo-label gates
   pseudo_confidence: 0.95
   reliability_threshold: 0.45
@@ -49,8 +49,8 @@ uda:
   lambda_cca: 0.5
   cca_start_epoch: 0
   cca_temperature: 0.10
-  lambda_coral: 0.5
-  lambda_lmmd: 0.5
+  lambda_coral: 0.3
+  lambda_lmmd: 0.3
   prototype_align_flag: true
   prototype_weight: 0.03
   prototype_confidence: 0.95
