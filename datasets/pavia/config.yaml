@@ -1,7 +1,7 @@
-﻿# Pavia: PaviaU -> PaviaC
+# Pavia: PaviaU -> PaviaC
 # Literature-aligned protocol (v3.0): 180 labeled source samples per class,
 # no source validation split, 50 epochs x 40 steps, final epoch reported.
-# SGD momentum 0.9 + cosine lr; batch 128 and extra modules are kept from v7.1.
+# AdamW/cosine, batch size and extra modules are intentionally kept from v7.1.
 dataset:
   source_name: paviaU
   target_name: paviaC
@@ -16,17 +16,11 @@ training:
   lr: 0.001
   weight_decay: 0.0004
   grad_clip: 5.0
-  # local feature extractor: 'ours' (v7.1) or 'dcrn' (SCLUDA stem)
-  backbone: ours
-  # AdamW + cosine lr (isolating the DCRN backbone change)
-  optimizer_type: adamw
-  constant_lr: false
-  # literature-aligned source budget: 180 labeled samples per class, all used for training
+  # literature-aligned source budget: 180 labeled samples per class, all for training
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
   # kept for the ratio-based fallback path (ignored when samples_per_class > 0)
-  # 20% of each class's labeled source pixels, all used for training (no val split)
-  source_train_ratio: 0.20
+  source_train_ratio: 0.38
   steps_per_epoch: 40
   source_sampler_power: 1.0
   target_train_max_samples: 30000
@@ -38,15 +32,10 @@ training:
 
 uda:
   ablation_id: full
-  # dual classifier: supervised second head + target pseudo-label consistency filter
-  dual_head_filter: true
-  lambda_dual_source: 0.5
   align_maturity_gate: false
   independent_target_reweight: false
   # no source validation -> report the final epoch (literature-aligned)
-  # pick the epoch with the best label-free reliability score (no target labels)
-  select_mode: label_free
-  select_final_epoch: false
+  select_final_epoch: true
   # schedule scaled to 50 epochs (proportional to the 60-epoch v2.2b schedule)
   anchor_freeze_epoch: 17
   pseudo_start_epoch: 17
@@ -57,7 +46,6 @@ uda:
   pseudo_confidence: 0.95
   reliability_threshold: 0.45
   pseudo_margin: 0.10
-  # per-class minimum pseudo-label quota: keeps silent classes (e.g. Bitumen) alive
   pseudo_min_per_class: 0
   # module set: CCA + CORAL + LMMD + prototype alignment
   lambda_cca: 0.5
