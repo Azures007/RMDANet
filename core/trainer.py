@@ -228,6 +228,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cempa_num_subprototypes", type=int, default=4)
     parser.add_argument("--cempa_min_age", type=int, default=2)
     parser.add_argument("--cempa_min_streak", type=int, default=2)
+    parser.add_argument(
+        "--pseudo_min_per_class",
+        type=int,
+        default=0,
+        help="per-class minimum accepted pseudo labels per step (0 = disable)",
+    )
 
     parser.add_argument("--lambda_style_supervision", type=float, default=1.0)
     parser.add_argument("--lambda_spectral_aux", type=float, default=0.060)
@@ -1724,6 +1730,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         class_cap=args.cempa_class_cap,
         min_age=args.cempa_min_age,
         min_streak=args.cempa_min_streak,
+        pseudo_min_per_class=int(getattr(args, "pseudo_min_per_class", 0)),
         use_probability_history=args.use_probability_history,
         use_time_score=args.use_time_score,
         use_feature_score=args.use_feature_score,

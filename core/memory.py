@@ -62,6 +62,7 @@ class ReliabilityPrototypeMemory:
         fixed_target_anchor_weight: float = 0.50,
         strict_class_balance_strength: float = 0.0,
         collapse_guard: bool = False,
+        pseudo_min_per_class: int = 0,
     ) -> None:
         self.num_classes = int(num_classes)
         self.feature_dim = int(feature_dim)
@@ -76,6 +77,10 @@ class ReliabilityPrototypeMemory:
         self.pseudo_confidence = float(pseudo_confidence)
         self.pseudo_margin = float(pseudo_margin)
         self.class_cap = int(class_cap)
+        # Per-class minimum pseudo-label quota (0 = disabled).  The global
+        # confidence/reliability gates can starve a class whose target prior is
+        # much larger than its source prior (e.g. Pavia Bitumen, HyRANK class 10).
+        self.pseudo_min_per_class = int(pseudo_min_per_class)
         self.min_age = int(min_age)
         self.min_streak = int(min_streak)
         self.use_probability_history = bool(use_probability_history)
@@ -618,6 +623,9 @@ class ReliabilityPrototypeMemory:
         # Cleanlab 过滤必须在 class-cap 之前，否则噪声样本先占 quota
         stable = stable & self.clean_mask[sample_ids]
         stable = self._class_balanced_top_mask(labels, reliability, stable)
+        stable = self._min_class_quota_mask(
+            labels, reliability, confidence, margin, thresholds, stable, sample_ids
+        )
         stable = self._collapse_guard_mask(labels, reliability, stable)
         if stable.any() and self.use_target_prototypes:
             self._update_target_subprototypes(
@@ -713,6 +721,50 @@ class ReliabilityPrototypeMemory:
                 continue
             keep = torch.topk(reliability[indices], k=cap, largest=True).indices
             selected[indices[keep]] = True
+        return selected
+
+    @torch.no_grad()
+    def _min_class_quota_mask(
+        self,
+        labels: torch.Tensor,
+        reliability: torch.Tensor,
+        confidence: torch.Tensor,
+        margin: torch.Tensor,
+        thresholds: torch.Tensor,
+        candidate: torch.Tensor,
+        sample_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """Rescue pseudo classes that the global gates starved.
+
+        For every predicted class with fewer than ``pseudo_min_per_class``
+        accepted samples, fill the gap with the most reliable remaining
+        candidates of that class under slightly relaxed gates.  Only
+        cleanlab-kept samples that already reached ``min_age`` are eligible.
+        ``pseudo_min_per_class == 0`` restores the exact previous behaviour.
+        """
+        if self.pseudo_min_per_class <= 0:
+            return candidate
+        selected = candidate.clone()
+        eligible = (
+            self.clean_mask[sample_ids]
+            & (confidence >= thresholds - 0.03)
+            & (margin >= 0.5 * self.pseudo_margin)
+        )
+        if self.use_time_score:
+            eligible = eligible & (self.age[sample_ids] >= self.min_age)
+        for class_id in range(self.num_classes):
+            class_mask = labels.eq(class_id)
+            accepted = int((selected & class_mask).sum().item())
+            if accepted >= self.pseudo_min_per_class:
+                continue
+            pool = torch.nonzero(
+                class_mask & eligible & ~selected, as_tuple=False
+            ).flatten()
+            if pool.numel() == 0:
+                continue
+            need = min(self.pseudo_min_per_class - accepted, int(pool.numel()))
+            keep = torch.topk(reliability[pool], k=need, largest=True).indices
+            selected[pool[keep]] = True
         return selected
 
     @torch.no_grad()

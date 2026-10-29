@@ -32,6 +32,8 @@ uda:
   pseudo_start_epoch: 50
   pseudo_confidence: 0.95
   pseudo_warm_epochs: 30
+  # scheme B: rescue starved pseudo classes (Bitumen/Bricks often get 0)
+  pseudo_min_per_class: 2
   target_gt_mix_ratio: 0.0
   use_gt_target_mask: false
   lambda_cca: 0.5
