@@ -49,7 +49,8 @@ uda:
   pseudo_confidence: 0.95
   reliability_threshold: 0.45
   pseudo_margin: 0.10
-  pseudo_min_per_class: 0
+  # per-class minimum pseudo-label quota: keeps silent classes (e.g. Bitumen) alive
+  pseudo_min_per_class: 3
   # module set: CCA + CORAL + LMMD + prototype alignment
   lambda_cca: 0.5
   cca_start_epoch: 0
