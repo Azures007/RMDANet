@@ -284,7 +284,9 @@ def train(args) -> dict:
             prob_t2 = F.softmax(out2[0][src_bs:].float(), dim=1)
             loss1 = F.cross_entropy(logits_s1, source_y, weight=class_weights)
             loss2 = F.cross_entropy(logits_s2, source_y, weight=class_weights)
-            mic_weights = pseudo_prob if reliable_weights is None else reliable_weights
+            # The reliability gate must NOT reshape the official MIC signal:
+            # it only supervises the extra pseudo-label CE term below.
+            mic_weights = pseudo_prob
             mic_a = _masked_consistency(
                 f1, backbone, masked_a, pseudo_label, mic_weights, float(args.mic_weight)
             )
