@@ -185,6 +185,11 @@ def build_parser():
                             help='maximum weight of the PATS-gated pseudo-label CE (0 disables)')
     ours_group.add_argument('--reliab_ce_min_prob', default=0.95, type=float,
                             help='teacher confidence threshold applied on top of the PATS selection')
+    ours_group.add_argument('--reliab_ce_agreement', action='store_true', default=False,
+                            help='keep only samples where the two classifier heads agree')
+    ours_group.add_argument('--reliab_ce_balance', default='none',
+                            choices=['none', 'inverse', 'sqrt'],
+                            help='class-frequency reweighting for the pseudo-label CE')
     ours_group.add_argument('--reliab_ce_start_epoch', default=10, type=int,
                             help='epoch to start the pseudo-label CE')
     ours_group.add_argument('--reliab_ce_ramp_epochs', default=10, type=int,
@@ -543,13 +548,27 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
                 pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
                 confident = pats_probs >= args.reliab_ce_min_prob
+                if args.reliab_ce_agreement:
+                    agreement = (output_t1[pats_indices].argmax(dim=1)
+                                 == output_t2[pats_indices].argmax(dim=1))
+                    confident = confident & agreement
             if confident.any():
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
+                sel_weight = sel_probs
+                if args.reliab_ce_balance != 'none':
+                    class_counts = torch.bincount(sel_labels, minlength=num_classes).float()
+                    class_freq = class_counts[sel_labels].clamp_min(1.0)
+                    if args.reliab_ce_balance == 'inverse':
+                        class_weight = 1.0 / class_freq
+                    else:
+                        class_weight = 1.0 / class_freq.sqrt()
+                    class_weight = class_weight / class_weight.mean().clamp_min(1e-6)
+                    sel_weight = sel_probs * class_weight
                 if reliab_ce_weight > 0:
                     ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
-                    rel_ce = (ce_all * sel_probs).sum() / sel_probs.sum().clamp_min(1e-6)
+                    rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
                     all_loss = all_loss + reliab_ce_weight * rel_ce
                 if proto_anchor_weight > 0:
                     proto_bank = source_prototype_state.get('prototypes')
