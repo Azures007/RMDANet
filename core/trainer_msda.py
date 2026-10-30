@@ -35,6 +35,7 @@ def load_official(msda_dir: str | None = None):
     directory = msda_dir or os.environ.get("MSDA_DIR", "/root/autodl-tmp/project")
     if directory not in sys.path:
         sys.path.insert(0, directory)
+    import HybridSN  # type: ignore
     from HybridSN import SSSE_test  # type: ignore
     from basenet import ResClassifier  # type: ignore
     from modules.masking import Masking_new  # type: ignore
@@ -42,8 +43,14 @@ def load_official(msda_dir: str | None = None):
     from modules.teacher import EMATeacher  # type: ignore
     from utils import weights_init  # type: ignore
 
+    backbones = {"SSSE_test": SSSE_test}
+    for name in ("SSSE", "SSSE_Houston"):
+        if hasattr(HybridSN, name):
+            backbones[name] = getattr(HybridSN, name)
+
     return {
         "SSSE_test": SSSE_test,
+        "backbones": backbones,
         "ResClassifier": ResClassifier,
         "weights_init": weights_init,
         "Masking_new": Masking_new,
@@ -91,6 +98,12 @@ def build_msda_parser():
     )
     parser.add_argument("--reliab_pseudo_weight", type=float, default=0.10)
     parser.add_argument("--g_momentum", type=float, default=0.9)
+    parser.add_argument(
+        "--backbone_class",
+        type=str,
+        default="SSSE_test",
+        help="Official HybridSN variant: SSSE / SSSE_test / SSSE_Houston.",
+    )
     return parser
 
 
@@ -197,7 +210,14 @@ def train(args) -> dict:
             f"source={len(source_loader.dataset)} target={len(target_loader.dataset)}"
         )
 
-    backbone = official["SSSE_test"](
+    backbone_name = str(getattr(args, "backbone_class", "SSSE_test") or "SSSE_test")
+    backbone_factory = official["backbones"].get(backbone_name)
+    if backbone_factory is None:
+        raise ValueError(
+            f"Unknown backbone {backbone_name!r}; available: {sorted(official['backbones'])}"
+        )
+    print(f"[msda-recipe] backbone = {backbone_name}")
+    backbone = backbone_factory(
         input_channels=bands, patch_size=args.patch_size, n_classes=num_classes
     ).to(device)
     f1 = official["ResClassifier"](num_classes, training=True).to(device)

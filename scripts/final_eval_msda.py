@@ -71,7 +71,13 @@ def main() -> None:
         src.image, target.image, strength=t.band_alignment_strength,
         renormalize=mode == "l2",
     )
-    backbone = official["SSSE_test"](
+    backbone_name = str(getattr(t, "backbone_class", "SSSE_test") or "SSSE_test")
+    backbone_factory = official["backbones"].get(backbone_name)
+    if backbone_factory is None:
+        raise ValueError(
+            f"Unknown backbone {backbone_name!r}; available: {sorted(official['backbones'])}"
+        )
+    backbone = backbone_factory(
         input_channels=aligned.shape[-1], patch_size=t.patch_size, n_classes=t.num_classes
     ).to(device)
     f1 = official["ResClassifier"](t.num_classes, training=True).to(device)

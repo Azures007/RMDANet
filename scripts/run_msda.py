@@ -42,6 +42,8 @@ def get_args(options):
         args.reliab_min_prob = options.reliab_min_prob
         args.reliab_class_cap = options.reliab_class_cap
         args.reliab_pseudo_weight = options.reliab_weight
+    if options.backbone_class:
+        args.backbone_class = options.backbone_class
     args.use_gt_target_mask = False
     args.target_gt_mix_ratio = 0.0
     args.diagnostic_target_oa = False
@@ -67,6 +69,12 @@ def main():
         "--use-official-data",
         action="store_true",
         help="Use the official MSDA Pavia data pipeline (utils.get_sample_data/get_all_data).",
+    )
+    parser.add_argument(
+        "--backbone-class",
+        type=str,
+        default="",
+        help="Official HybridSN variant: SSSE / SSSE_test / SSSE_Houston.",
     )
     parser.add_argument(
         "--reliab-pseudo",
