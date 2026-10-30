@@ -222,8 +222,10 @@ def train(args) -> dict:
         spectral_block_size=args.spectral_block_size, spatial_block_size=args.spatial_block_size,
     )
 
+    # Official up2pc.py: the generator is optimised WITHOUT momentum, the two
+    # classifiers WITH momentum 0.9.
     optimizer_g = torch.optim.SGD(
-        backbone.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay
+        backbone.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
     optimizer_f = torch.optim.SGD(
         list(f1.parameters()) + list(f2.parameters()),
