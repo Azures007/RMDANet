@@ -195,11 +195,29 @@ def build_parser():
                             help='epoch to start the prototype anchor loss')
     ours_group.add_argument('--proto_anchor_ramp_epochs', default=10, type=int,
                             help='epochs used to linearly ramp up the prototype anchor weight')
+    ours_group.add_argument('--coral_weight', default=0.0, type=float,
+                            help='maximum weight of the CORAL second-order alignment (0 disables)')
+    ours_group.add_argument('--coral_start_epoch', default=10, type=int,
+                            help='epoch to start the CORAL alignment')
+    ours_group.add_argument('--coral_ramp_epochs', default=10, type=int,
+                            help='epochs used to linearly ramp up the CORAL weight')
     runtime_group.add_argument('--num_seeds', type=int, default=10,
                                help='number of seeds evaluated from SEEDS (default: all 10)')
     runtime_group.add_argument('--seed_offset', type=int, default=0,
                                help='index of the first seed taken from SEEDS')
     return parser
+
+
+def coral_loss(source_features, target_features):
+    """Second-order (CORAL) alignment between source and target projections."""
+    source = source_features.float()
+    target = target_features.float()
+    dim = source.size(1)
+    source_centered = source - source.mean(dim=0, keepdim=True)
+    target_centered = target - target.mean(dim=0, keepdim=True)
+    source_cov = source_centered.t().matmul(source_centered) / max(1, source.size(0) - 1)
+    target_cov = target_centered.t().matmul(target_centered) / max(1, target.size(0) - 1)
+    return ((source_cov - target_cov) ** 2).sum() / (4.0 * dim * dim)
 
 
 def parse_runtime_args():
@@ -514,6 +532,12 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                                 proj, proto_bank[sel_labels[valid_class]], dim=1
                             )
                             all_loss = all_loss + proto_anchor_weight * anchor.mean()
+
+        coral_weight = get_rampup_weight(
+            ep, args.coral_start_epoch, args.coral_ramp_epochs, args.coral_weight
+        )
+        if coral_weight > 0:
+            all_loss = all_loss + coral_weight * coral_loss(student_proj_s, student_proj_t)
 
         if args.log_results:
             wandb.log({f'{seed}_A_loss': all_loss})
