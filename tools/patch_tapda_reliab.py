@@ -103,9 +103,11 @@ def _insert_args(text: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tapda-dir", default="/root/autodl-tmp/tapda")
+    parser.add_argument("--script", default="up2pc.py",
+                        help="entry script to patch (up2pc.py / houston13218.py / ...)")
     options = parser.parse_args()
 
-    path = Path(options.tapda_dir) / "up2pc.py"
+    path = Path(options.tapda_dir) / options.script
     if not path.is_file():
         raise FileNotFoundError(path)
     text = path.read_text(encoding="utf8")
