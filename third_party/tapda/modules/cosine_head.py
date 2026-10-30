@@ -4,9 +4,10 @@ TAPDA builds ``ResClassifier`` heads and calls ``F(features)``:
   * training mode -> ``(logits, embedding)``
   * eval mode     -> ``logits``
 
-This head keeps the exact same contract while using the v3.0 cosine classifier
-(normalised features x normalised class prototypes x learnable temperature),
-which is the classifier used by v3.0's DualReliabilityEncoder.
+ResClassifier implements this by overriding ``nn.Module.training`` in its
+constructor, so ``.train()`` / ``.eval()`` toggle the return signature.  This
+head reproduces exactly that behaviour (otherwise evaluation would receive a
+tuple and fail when adding the two heads' logits).
 """
 
 from __future__ import annotations
@@ -30,13 +31,14 @@ class CosineClassifierHead(nn.Module):
         self.weight = nn.Parameter(torch.empty(class_num, feature_dim))
         self.log_scale = nn.Parameter(torch.tensor(math.log(initial_scale), dtype=torch.float32))
         nn.init.normal_(self.weight, std=0.02)
-        self.training_flag = bool(training)
+        # Overrides nn.Module.training on purpose, mirroring ResClassifier.
+        self.training = bool(training)
 
     def forward(self, features: torch.Tensor):
         normalised = F.normalize(features, dim=1)
         weight = F.normalize(self.weight, dim=1)
         scale = self.log_scale.exp().clamp(4.0, 30.0)
         logits = scale * (normalised @ weight.t())
-        if self.training_flag:
+        if self.training:
             return logits, normalised
         return logits
