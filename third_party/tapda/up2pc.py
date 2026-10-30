@@ -75,6 +75,10 @@ def build_parser():
                                help='disable CUDA-specific tensor moves')
     runtime_group.add_argument('--log-interval', type=int, default=5, metavar='N',
                                help='batches between training status prints')
+    runtime_group.add_argument('--num_seeds', type=int, default=10,
+                               help='number of seeds evaluated from SEEDS (default: all 10)')
+    runtime_group.add_argument('--seed_offset', type=int, default=0,
+                               help='index of the first seed taken from SEEDS')
 
     data_group = parser.add_argument_group('Data and model shape')
     data_group.add_argument('--halfwidth', default=4, type=int,
@@ -735,11 +739,12 @@ def main():
             'halfwidth': args.halfwidth,
             'patch_size': 2 * args.halfwidth + 1,
         }
-        metrics_state = create_metric_buffers(len(SEEDS), NUM_CLASSES)
+        run_seeds = SEEDS[args.seed_offset:args.seed_offset + args.num_seeds]
+        metrics_state = create_metric_buffers(len(run_seeds), NUM_CLASSES)
         best_test_acc = 0
         last_timing = {'train_start': 0, 'train_end': 0, 'test_start': 0, 'test_end': 0}
 
-        for dataset_index, seed in enumerate(SEEDS):
+        for dataset_index, seed in enumerate(run_seeds):
             best_test_acc, last_timing = run_one_dataset(
                 dataset_index,
                 seed,
