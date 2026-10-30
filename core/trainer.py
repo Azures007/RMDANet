@@ -327,7 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--input_normalization",
         type=str,
         default="l2",
-        choices=["l2", "median", "band", "scale"],
+        choices=["l2", "median", "band", "scale", "raw"],
         help="Input normalization: per-pixel L2 (default), scene-median scaling, "
              "per-band z-score over valid pixels (band), or per-band z-score over "
              "all pixels (scale, literature-style).",

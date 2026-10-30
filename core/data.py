@@ -101,6 +101,10 @@ def robust_scene_normalize(image: np.ndarray, mode: str = "l2") -> np.ndarray:
     if not valid.any():
         raise ValueError("The scene contains no finite non-zero spectra.")
 
+    if mode == "raw":
+        # Official Houston / HyRANK scripts (utils.load_data_houston,
+        # utils.load_data_hyrank) return the raw cube without any scaling.
+        return np.asarray(image, dtype=np.float32)
     if mode == "median":
         # Divide by one scene-level scalar instead of the per-pixel norm, so
         # relative albedo survives.  Pavia's Bitumen / Bricks / BareSoil are
