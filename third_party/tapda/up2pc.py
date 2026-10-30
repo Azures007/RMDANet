@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -68,7 +69,13 @@ def build_parser():
     runtime_group.add_argument('--lr', type=float, default=0.1, metavar='LR',
                                help='learning rate used by the selected optimizer')
     runtime_group.add_argument('--optimizer', type=str, default='momentum', metavar='OP',
-                               help='optimizer name: momentum, adam, or any other value for Adadelta')
+                               help='optimizer name: momentum, adam, adamw, or any other value for Adadelta')
+    runtime_group.add_argument('--weight_decay', type=float, default=5e-4,
+                               help='weight decay for all optimizers')
+    runtime_group.add_argument('--label_smoothing', type=float, default=0.0,
+                               help='label smoothing for the classification loss')
+    runtime_group.add_argument('--lr_schedule', default='none', choices=['none', 'cosine'],
+                               help='learning-rate schedule over epochs')
     runtime_group.add_argument('--num_k', type=int, default=3, metavar='K',
                                help='number of Step C generator updates per batch')
     runtime_group.add_argument('--gpu', default=0, type=int,
@@ -394,22 +401,29 @@ def initialize_models_and_optimizers(n_bands, patch_size, num_classes, device, a
         F2.cuda()
 
     if args.optimizer == 'momentum':
-        optimizer_g = optim.SGD(list(G.parameters()), lr=args.lr, weight_decay=0.0005)
+        optimizer_g = optim.SGD(list(G.parameters()), lr=args.lr, weight_decay=args.weight_decay)
         optimizer_f = optim.SGD(
             list(F1.parameters()) + list(F2.parameters()),
             momentum=0.9,
             lr=args.lr,
-            weight_decay=0.0005,
+            weight_decay=args.weight_decay,
+        )
+    elif args.optimizer == 'adamw':
+        optimizer_g = optim.AdamW(list(G.parameters()), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer_f = optim.AdamW(
+            list(F1.parameters()) + list(F2.parameters()),
+            lr=args.lr,
+            weight_decay=args.weight_decay,
         )
     elif args.optimizer == 'adam':
-        optimizer_g = optim.Adam(G.parameters(), lr=args.lr, weight_decay=0.0005)
-        optimizer_f = optim.Adam(list(F1.parameters()) + list(F2.parameters()), lr=args.lr, weight_decay=0.0005)
+        optimizer_g = optim.Adam(G.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer_f = optim.Adam(list(F1.parameters()) + list(F2.parameters()), lr=args.lr, weight_decay=args.weight_decay)
     else:
-        optimizer_g = optim.Adadelta(G.parameters(), lr=args.lr, weight_decay=0.0005)
+        optimizer_g = optim.Adadelta(G.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         optimizer_f = optim.Adadelta(
             list(F1.parameters()) + list(F2.parameters()),
             lr=args.lr,
-            weight_decay=0.0005,
+            weight_decay=args.weight_decay,
         )
 
     return {
@@ -428,7 +442,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
                 source_prototype_state):
     iter_source, iter_target = iter(train_loader), iter(train_tar_loader)
-    criterion = nn.CrossEntropyLoss().to(DEV)
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing).to(DEV)
     G.train()
     F1.train()
     F2.train()
@@ -792,6 +806,12 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     epoch_test_start = epoch_train_start
     epoch_test_end = epoch_train_start
     for ep in range(1, num_epoch + 1):
+        if args.lr_schedule == 'cosine':
+            progress = (ep - 1) / max(1, num_epoch - 1)
+            lr_now = args.lr * 0.5 * (1.0 + math.cos(math.pi * progress))
+            for optimizer in (optimizer_g, optimizer_f):
+                for group in optimizer.param_groups:
+                    group['lr'] = lr_now
         train_epoch(
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             contrastive_loss_func, optimizer_g, optimizer_f,
