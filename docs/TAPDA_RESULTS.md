@@ -113,7 +113,24 @@ TAPDA 的 HyRANK 脚本由 `tools/make_tapda_hyrank.py` 从 `up2pc.py` 生成
 ### M3：源原型锚定损失
 
 `--proto_anchor_weight`（默认 0）：`L = mean(1 - cos(student_proj_t, source_proto[pseudo]))`，
-只对 PATS 选中且原型已见类的样本计算。待验证。
+只对 PATS 选中且原型已见类的样本计算。
+
+### M2 / M3 实测（2 seed：Pavia 1726/1040，Houston 1599/1364）
+
+| 组合 | Pavia 均值 | Houston 均值 |
+|---|---|---|
+| **M1 单独** | **92.16** | **79.82** |
+| M1 + 原型否决（M2，`--target_prototype_filter`） | 90.43（−1.73） | 79.13（−0.69） |
+| M1 + M3（`--proto_anchor_weight 0.1`） | 90.42（−1.74） | 79.68（−0.14） |
+| M1 + M3 弱化（0.05，start 20） | 91.01（−1.15） | 78.34（−1.48） |
+
+结论：**M2、M3 均有害**。TAPDA 的 PATS 选样已经足够，额外叠加原型硬约束/锚定会破坏
+其对比学习平衡；增益来自"对选中样本加显式监督"（M1），而非"增加更多约束"。
+
+### M4：CORAL 二阶对齐
+
+`--coral_weight`（默认 0）：在 projection 特征上计算源/目标协方差差（batch 级）。
+待实测。
 
 ## 3. 结论
 
