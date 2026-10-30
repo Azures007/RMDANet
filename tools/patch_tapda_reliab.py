@@ -2,7 +2,7 @@
 
 TAPDA selects reliable target samples (PATS) and uses them ONLY for contrastive
 distillation; there is no explicit pseudo-label classification loss on the
-target domain.  This patch adds exactly that missing supervision path:
+target domain.  This patch adds that missing supervision path:
 
     L_rel = sum_i w_i * CE(student_logits_i, teacher_label_i) / sum_i w_i
     w_i   = teacher_prob_i * [teacher_prob_i >= min_prob] * class_cap_mask
@@ -12,8 +12,9 @@ Control flags (default: disabled, i.e. original TAPDA):
     --reliab_pseudo_min_prob    (float, default 0.95)
     --reliab_pseudo_class_cap   (int,   default 8)
 
-The anchors are detected with regular expressions so that minor formatting
-differences in the TAPDA checkout do not break the patch.  Idempotent.
+The TAPDA code builds its CLI inside ``build_parser()`` and later calls
+``build_parser().parse_args()``, so the flags are injected before the
+``return parser`` statement of that function.  Idempotent.
 
 Usage:
     python tools/patch_tapda_reliab.py --tapda-dir /root/autodl-tmp/tapda
@@ -24,16 +25,18 @@ import argparse
 import re
 from pathlib import Path
 
-ARGS_BLOCK = """# ---- reliability-weighted pseudo-label supervision (our add-on) ----
-parser.add_argument('--reliab_pseudo_ce_weight', default=0.0, type=float,
-                    help='weight of reliability-weighted pseudo-label CE (0 = original TAPDA)')
-parser.add_argument('--reliab_pseudo_min_prob', default=0.95, type=float,
-                    help='teacher confidence threshold for pseudo-label supervision')
-parser.add_argument('--reliab_pseudo_class_cap', default=8, type=int,
-                    help='max pseudo-labelled samples per class per batch (0 = no cap)')
+ARGS_BLOCK = """
+    # ---- reliability-weighted pseudo-label supervision (our add-on) ----
+    parser.add_argument('--reliab_pseudo_ce_weight', default=0.0, type=float,
+                        help='weight of reliability-weighted pseudo-label CE (0 = original TAPDA)')
+    parser.add_argument('--reliab_pseudo_min_prob', default=0.95, type=float,
+                        help='teacher confidence threshold for pseudo-label supervision')
+    parser.add_argument('--reliab_pseudo_class_cap', default=8, type=int,
+                        help='max pseudo-labelled samples per class per batch (0 = no cap)')
 """
 
-LOSS_BLOCK = """        # ---- our contribution: explicit reliability-weighted pseudo-label CE ----
+LOSS_BLOCK = """
+        # ---- our contribution: explicit reliability-weighted pseudo-label CE ----
         if getattr(args, 'reliab_pseudo_ce_weight', 0.0) > 0.0:
             with torch.no_grad():
                 rel_labels = F1_pseudo_label_t.detach()
@@ -55,11 +58,31 @@ LOSS_BLOCK = """        # ---- our contribution: explicit reliability-weighted p
                 all_loss = all_loss + args.reliab_pseudo_ce_weight * reliability_loss
 """
 
-ARGS_PATTERN = re.compile(r"^(?P<indent>[ \t]*)args\s*=\s*parser\.parse_args\(\)", re.M)
+FUNC_PATTERN = re.compile(r"^def build_parser\(", re.M)
+RETURN_PATTERN = re.compile(r"^([ \t]*)return parser\b", re.M)
 LOSS_PATTERN = re.compile(
     r"^(?P<indent>[ \t]*)all_loss\s*=\s*loss1\s*\+\s*loss2\s*\+\s*bnm_loss_a\s*\+\s*contrastive_loss",
     re.M,
 )
+
+
+def _insert_args(text: str) -> str:
+    func = FUNC_PATTERN.search(text)
+    if func is None:
+        raise RuntimeError(
+            "def build_parser(...) not found; run: grep -n 'def build_parser' up2pc.py"
+        )
+    body_start = func.end()
+    next_top = re.search(r"^(def |class )", text[body_start:], re.M)
+    body_end = body_start + (next_top.start() if next_top else len(text))
+    body = text[body_start:body_end]
+    ret = RETURN_PATTERN.search(body)
+    if ret is None:
+        raise RuntimeError(
+            "return parser not found inside build_parser; run: grep -n 'return parser' up2pc.py"
+        )
+    position = body_start + ret.start()
+    return text[:position] + ARGS_BLOCK + text[position:]
 
 
 def main() -> None:
@@ -73,21 +96,12 @@ def main() -> None:
     text = path.read_text(encoding="utf8")
     changes = []
 
-    # ---- CLI flags ---------------------------------------------------------
     if "reliab_pseudo_ce_weight" in text:
         changes.append("CLI flags already present")
     else:
-        match = ARGS_PATTERN.search(text)
-        if match is None:
-            raise RuntimeError(
-                "argparse anchor 'args = parser.parse_args()' not found; "
-                "run: grep -n 'parse_args' up2pc.py"
-            )
-        insert = ARGS_BLOCK + match.group("indent") + "args = parser.parse_args()"
-        text = text[: match.start()] + insert + text[match.end():]
-        changes.append("added CLI flags")
+        text = _insert_args(text)
+        changes.append("added CLI flags inside build_parser()")
 
-    # ---- reliability-weighted pseudo-label CE ------------------------------
     if "reliability_loss = (pseudo_ce * rel_weights).sum()" in text:
         changes.append("loss block already present")
     else:
@@ -97,14 +111,8 @@ def main() -> None:
                 "loss anchor 'all_loss = loss1 + loss2 + bnm_loss_a + contrastive_loss' "
                 "not found; run: grep -n 'all_loss =' up2pc.py"
             )
-        indent = match.group("indent")
-        block = LOSS_BLOCK.replace("        # ---- our", indent + "# ---- our")
-        block = "\n".join(
-            (indent + line[8:] if line.startswith("        ") else line)
-            for line in block.splitlines()
-        )
         end = match.end()
-        text = text[:end] + "\n" + block + text[end:]
+        text = text[:end] + "\n" + LOSS_BLOCK.lstrip("\n") + text[end:]
         changes.append("added reliability-weighted pseudo CE")
 
     path.write_text(text, encoding="utf8")
