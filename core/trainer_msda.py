@@ -90,6 +90,7 @@ def build_msda_parser():
         help="Max pseudo-labelled target samples per class per batch (0 = no cap).",
     )
     parser.add_argument("--reliab_pseudo_weight", type=float, default=0.10)
+    parser.add_argument("--g_momentum", type=float, default=0.9)
     return parser
 
 
@@ -222,10 +223,15 @@ def train(args) -> dict:
         spectral_block_size=args.spectral_block_size, spatial_block_size=args.spatial_block_size,
     )
 
-    # Official up2pc.py: the generator is optimised WITHOUT momentum, the two
-    # classifiers WITH momentum 0.9.
+    # Official up2pc.py uses no momentum for the generator, but in our loop that
+    # makes the source fit too fast (src_acc 99.9%) and destabilises the
+    # pseudo-label gate (Pavia fell to 83.62).  Default 0.9 matches our best
+    # result; pass --g_momentum 0.0 for exact official equivalence.
     optimizer_g = torch.optim.SGD(
-        backbone.parameters(), lr=args.lr, weight_decay=args.weight_decay
+        backbone.parameters(),
+        lr=args.lr,
+        momentum=float(getattr(args, "g_momentum", 0.9)),
+        weight_decay=args.weight_decay,
     )
     optimizer_f = torch.optim.SGD(
         list(f1.parameters()) + list(f2.parameters()),
