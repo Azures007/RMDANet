@@ -435,6 +435,7 @@ class PatchDataset(Dataset):
         patch_size: int,
         labels: np.ndarray | None = None,
         augment: bool = False,
+        padding: str = "symmetric",
     ) -> None:
         if patch_size % 2 != 1:
             raise ValueError("patch_size must be odd.")
@@ -443,7 +444,7 @@ class PatchDataset(Dataset):
         self.image = np.pad(
             np.asarray(image, dtype=np.float32),
             ((self.radius, self.radius), (self.radius, self.radius), (0, 0)),
-            mode="symmetric",
+            mode=str(padding),
         )
         self.coordinates = np.asarray(coordinates, dtype=np.int64)
         self.labels = None if labels is None else np.asarray(labels, dtype=np.int64)

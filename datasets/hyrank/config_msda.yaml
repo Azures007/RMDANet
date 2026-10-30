@@ -16,6 +16,7 @@ training:
   grad_clip: 5.0
   optimizer_type: sgd
   constant_lr: true
+  patch_padding: constant
   input_normalization: scale
   backbone_class: SSSE_test
   source_samples_per_class: 180

@@ -333,6 +333,13 @@ def build_parser() -> argparse.ArgumentParser:
              "all pixels (scale, literature-style).",
     )
     parser.add_argument(
+        "--patch_padding",
+        type=str,
+        default="symmetric",
+        choices=["symmetric", "constant"],
+        help="Patch padding: symmetric (ours) or constant zeros (official MSDA).",
+    )
+    parser.add_argument(
         "--band_subset",
         type=str,
         default="",
@@ -1038,12 +1045,14 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         max_neighbors=args.max_neighbors,
     )
 
+    patch_padding = str(getattr(args, "patch_padding", "symmetric") or "symmetric")
     source_train_dataset = PatchDataset(
         source_image,
         source_train_coordinates,
         patch_size=args.patch_size,
         labels=source_train_labels,
         augment=bool(getattr(args, "source_augment", True)),
+        padding=patch_padding,
     )
     source_validation_dataset = (
         PatchDataset(
@@ -1052,6 +1061,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
             patch_size=args.patch_size,
             labels=source_validation_labels,
             augment=False,
+            padding=patch_padding,
         )
         if len(source_validation_coordinates) > 0
         else None
@@ -1062,6 +1072,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         patch_size=args.patch_size,
         labels=None,
         augment=False,
+        padding=patch_padding,
     )
 
     counts = np.bincount(source_train_labels, minlength=num_classes).astype(np.float64)
@@ -1161,12 +1172,14 @@ def build_target_evaluation_loader(
     valid = (ground_truth > 0) & (np.linalg.norm(target_image, axis=-1) > 0)
     coordinates = coordinates_from_mask(valid)
     labels = labels_at_coordinates(ground_truth, coordinates) - 1
+    patch_padding = str(getattr(args, "patch_padding", "symmetric") or "symmetric")
     dataset = PatchDataset(
         target_image,
         coordinates,
         patch_size=args.patch_size,
         labels=labels,
         augment=False,
+        padding=patch_padding,
     )
     return data.DataLoader(
         dataset,

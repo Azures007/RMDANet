@@ -16,6 +16,7 @@ training:
   grad_clip: 5.0
   optimizer_type: sgd
   constant_lr: true
+  patch_padding: constant
   input_normalization: raw
   backbone_class: SSSE_Houston
   band_subset: 'first:48'
