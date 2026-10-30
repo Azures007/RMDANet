@@ -77,7 +77,40 @@ def build_msda_parser():
         help="Build the Pavia loaders with the official MSDA data pipeline "
              "(utils.load_data_pavia + get_sample_data + get_all_data).",
     )
+    parser.add_argument(
+        "--reliab_pseudo",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Reliability-gated, class-balanced pseudo-label supervision "
+             "(confidence filter + per-class quota + weighted pseudo CE).",
+    )
+    parser.add_argument("--reliab_min_prob", type=float, default=0.98)
+    parser.add_argument(
+        "--reliab_class_cap", type=int, default=8,
+        help="Max pseudo-labelled target samples per class per batch (0 = no cap).",
+    )
+    parser.add_argument("--reliab_pseudo_weight", type=float, default=0.10)
     return parser
+
+
+def _reliable_weights(pseudo_label, pseudo_prob, num_classes, min_prob, class_cap):
+    """Confidence filter + per-class quota over the EMA-teacher pseudo labels.
+
+    Returns a per-sample weight (teacher probability of the kept samples, zero
+    elsewhere).  This transplants the reliability gate of our own model onto the
+    MSDA base recipe as an add-on module.
+    """
+    keep = torch.zeros_like(pseudo_prob)
+    for class_id in range(int(num_classes)):
+        mask = pseudo_label == class_id
+        if not bool(mask.any()):
+            continue
+        values = pseudo_prob[mask]
+        k = values.numel() if class_cap <= 0 else min(int(class_cap), values.numel())
+        top = torch.topk(values, k).indices
+        keep[mask.nonzero(as_tuple=True)[0][top]] = 1.0
+    keep = keep * (pseudo_prob >= float(min_prob)).float()
+    return keep * pseudo_prob
 
 
 def _masked_consistency(classifier, backbone, masked_input, pseudo_label, pseudo_prob, weight):
@@ -208,7 +241,7 @@ def train(args) -> dict:
         backbone.train()
         f1.train()
         f2.train()
-        totals = {"ce": 0.0, "mic": 0.0, "mcc": 0.0, "dis": 0.0, "acc": 0.0}
+        totals = {"ce": 0.0, "mic": 0.0, "mcc": 0.0, "dis": 0.0, "acc": 0.0, "rel": 0.0}
         batches = 0
         for step, (source_x, source_y) in enumerate(source_loader):
             try:
@@ -227,6 +260,17 @@ def train(args) -> dict:
             teacher.update_weights(backbone, f1, epoch * num_iter + step)
             with torch.no_grad():
                 pseudo_label, pseudo_prob = teacher(target_x)
+            reliable_weights = None
+            reliable_fraction = 0.0
+            if bool(getattr(args, "reliab_pseudo", False)):
+                reliable_weights = _reliable_weights(
+                    pseudo_label,
+                    pseudo_prob,
+                    num_classes,
+                    min_prob=float(args.reliab_min_prob),
+                    class_cap=int(args.reliab_class_cap),
+                )
+                reliable_fraction = float((reliable_weights > 0).float().mean())
 
             # ---- Step A: all networks minimise source CE + MIC + MCC
             optimizer_g.zero_grad()
@@ -240,11 +284,20 @@ def train(args) -> dict:
             prob_t2 = F.softmax(out2[0][src_bs:].float(), dim=1)
             loss1 = F.cross_entropy(logits_s1, source_y, weight=class_weights)
             loss2 = F.cross_entropy(logits_s2, source_y, weight=class_weights)
+            mic_weights = pseudo_prob if reliable_weights is None else reliable_weights
             mic_a = _masked_consistency(
-                f1, backbone, masked_a, pseudo_label, pseudo_prob, float(args.mic_weight)
+                f1, backbone, masked_a, pseudo_label, mic_weights, float(args.mic_weight)
             )
             mcc_a = mcc_loss(prob_t1) + mcc_loss(prob_t2)
-            (loss1 + loss2 + mic_a + mcc_a).backward()
+            all_loss = loss1 + loss2 + mic_a + mcc_a
+            if reliable_weights is not None and float(args.reliab_pseudo_weight) > 0.0:
+                pseudo_ce = F.cross_entropy(
+                    out1[0][src_bs:], pseudo_label, reduction="none"
+                )
+                denominator = reliable_weights.sum().clamp_min(1.0)
+                loss_pseudo = (pseudo_ce * reliable_weights).sum() / denominator
+                all_loss = all_loss + float(args.reliab_pseudo_weight) * loss_pseudo
+            all_loss.backward()
             optimizer_g.step()
             optimizer_f.step()
 
@@ -261,7 +314,7 @@ def train(args) -> dict:
             loss1 = F.cross_entropy(logits_s1, source_y, weight=class_weights)
             loss2 = F.cross_entropy(logits_s2, source_y, weight=class_weights)
             mic_b = _masked_consistency(
-                f1, backbone, masked_b, pseudo_label, pseudo_prob, float(args.mic_weight)
+                f1, backbone, masked_b, pseudo_label, mic_weights, float(args.mic_weight)
             )
             mcc_b = mcc_loss(prob_t1) + mcc_loss(prob_t2)
             discrepancy = torch.mean(torch.abs(prob_t1 - prob_t2))
@@ -295,6 +348,7 @@ def train(args) -> dict:
             totals["mcc"] += float(mcc_a.detach().item())
             totals["dis"] += float(discrepancy.detach().item())
             totals["acc"] += accuracy
+            totals["rel"] += reliable_fraction
             batches += 1
 
         if epoch % int(args.log_interval) == 0 or epoch == int(args.epochs):
@@ -304,7 +358,8 @@ def train(args) -> dict:
                 f"msda-epoch {epoch:03d}/{args.epochs} "
                 f"ce={totals['ce']/count:.4f} mic={totals['mic']/count:.4f} "
                 f"mcc={totals['mcc']/count:.4f} dis={totals['dis']/count:.4f} "
-                f"src_acc={100.0*totals['acc']/count:.2f} steps={num_iter} time={elapsed:.1f}m"
+                f"src_acc={100.0*totals['acc']/count:.2f} "
+                f"rel={100.0*totals['rel']/count:.1f}% steps={num_iter} time={elapsed:.1f}m"
             )
 
     checkpoint_path = run_dir / "selected_model.pt"

@@ -37,6 +37,11 @@ def get_args(options):
         args.batch_size = options.batch_size
     if options.use_official_data:
         args.use_official_data = True
+    if options.reliab_pseudo:
+        args.reliab_pseudo = True
+        args.reliab_min_prob = options.reliab_min_prob
+        args.reliab_class_cap = options.reliab_class_cap
+        args.reliab_pseudo_weight = options.reliab_weight
     args.use_gt_target_mask = False
     args.target_gt_mix_ratio = 0.0
     args.diagnostic_target_oa = False
@@ -63,6 +68,14 @@ def main():
         action="store_true",
         help="Use the official MSDA Pavia data pipeline (utils.get_sample_data/get_all_data).",
     )
+    parser.add_argument(
+        "--reliab-pseudo",
+        action="store_true",
+        help="Enable the reliability-gated pseudo-label add-on (our module).",
+    )
+    parser.add_argument("--reliab-min-prob", type=float, default=0.98)
+    parser.add_argument("--reliab-class-cap", type=int, default=8)
+    parser.add_argument("--reliab-weight", type=float, default=0.10)
     parser.add_argument("--dry-run", action="store_true")
     options = parser.parse_args()
 
