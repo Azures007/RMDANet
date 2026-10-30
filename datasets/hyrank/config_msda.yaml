@@ -22,7 +22,7 @@ training:
   source_budget_train_fraction: 1.0
   source_train_ratio: 0.38
   strict_source_budget: true
-  steps_per_epoch: 66
+  steps_per_epoch: 39
   min_steps_per_epoch: 5
   source_sampler_power: 1.0
   source_class_weight_power: 0.0
