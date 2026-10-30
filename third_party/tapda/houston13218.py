@@ -201,6 +201,12 @@ def build_parser():
                             help='epoch to start the CORAL alignment')
     ours_group.add_argument('--coral_ramp_epochs', default=10, type=int,
                             help='epochs used to linearly ramp up the CORAL weight')
+    ours_group.add_argument('--prat_prob', default=0.0, type=float,
+                            help='probability of applying PRAT amplitude transfer to target batches')
+    ours_group.add_argument('--prat_strength', default=0.5, type=float,
+                            help='blend strength of source amplitude in PRAT augmentation')
+    ours_group.add_argument('--prat_start_epoch', default=0, type=int,
+                            help='epoch to start PRAT augmentation')
     runtime_group.add_argument('--num_seeds', type=int, default=10,
                                help='number of seeds evaluated from SEEDS (default: all 10)')
     runtime_group.add_argument('--seed_offset', type=int, default=0,
@@ -218,6 +224,29 @@ def coral_loss(source_features, target_features):
     source_cov = source_centered.t().matmul(source_centered) / max(1, source.size(0) - 1)
     target_cov = target_centered.t().matmul(target_centered) / max(1, target.size(0) - 1)
     return ((source_cov - target_cov) ** 2).sum() / (4.0 * dim * dim)
+
+
+def prat_augment(source_images, target_images, strength=0.5, probability=0.5):
+    """PRAT-style amplitude transfer (Fourier domain, spatial dims).
+
+    Keeps the target phase and blends the target amplitude with the batch-mean
+    source amplitude, transferring the source-domain spectral statistics.
+    """
+    if probability <= 0 or strength <= 0:
+        return target_images
+    if torch.rand(1).item() > probability:
+        return target_images
+    with torch.no_grad():
+        source = source_images.float()
+        target = target_images.float()
+        source_fft = torch.fft.fftn(source, dim=(-2, -1))
+        target_fft = torch.fft.fftn(target, dim=(-2, -1))
+        source_amp = source_fft.abs().mean(dim=0, keepdim=True)
+        target_amp = target_fft.abs()
+        target_phase = target_fft / (target_amp + 1e-8)
+        blended_amp = (1.0 - strength) * target_amp + strength * source_amp
+        restored = torch.fft.ifftn(blended_amp * target_phase, dim=(-2, -1)).real
+    return restored.type_as(target_images)
 
 
 def parse_runtime_args():
@@ -410,6 +439,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             data1, target1 = data_source, label_source
             data2 = data_target
             label_target_diag = label_target
+
+        if args.prat_prob > 0 and ep >= args.prat_start_epoch:
+            data2 = prat_augment(data1, data2, args.prat_strength, args.prat_prob)
 
         eta = 1.0
         src_batch_size = data1.size(0)
