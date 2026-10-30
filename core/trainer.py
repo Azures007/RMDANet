@@ -28,6 +28,7 @@ from data import (
     load_source_scene,
     load_target_ground_truth_only,
     load_target_image_only,
+    select_band_subset,
     spatially_stratified_subset,
     stratified_source_split,
 )
@@ -326,9 +327,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--input_normalization",
         type=str,
         default="l2",
-        choices=["l2", "median", "band"],
+        choices=["l2", "median", "band", "scale"],
         help="Input normalization: per-pixel L2 (default), scene-median scaling, "
-             "or per-band z-score (literature-style, keeps relative magnitude).",
+             "per-band z-score over valid pixels (band), or per-band z-score over "
+             "all pixels (scale, literature-style).",
+    )
+    parser.add_argument(
+        "--band_subset",
+        type=str,
+        default="",
+        help='Band subset for the literature tasks: "first:N" or "0,1,2,...".',
     )
     parser.add_argument(
         "--amplitude_input",
@@ -936,9 +944,19 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     )
     if source_scene.image.shape[-1] != target_scene.image.shape[-1]:
         raise ValueError("Source and target scenes have different band counts.")
+    band_subset = str(getattr(args, "band_subset", "") or "")
+    if band_subset:
+        source_bands = select_band_subset(source_scene.image, band_subset)
+        target_bands = select_band_subset(target_scene.image, band_subset)
+        print(f"[bands] subset {band_subset!r} -> {source_bands.shape[-1]} bands")
+        if getattr(args, "amplitude_input", False):
+            raise ValueError("band_subset is incompatible with amplitude_input")
+    else:
+        source_bands = source_scene.image
+        target_bands = target_scene.image
     target_image, alignment = align_target_bands(
-        source_scene.image,
-        target_scene.image,
+        source_bands,
+        target_bands,
         strength=args.band_alignment_strength,
         # Only the per-pixel L2 pipeline re-normalizes after alignment.
         renormalize=normalize_mode == "l2",
@@ -954,7 +972,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
             [target_image, target_scene.amplitude[..., None]], axis=-1
         )
     else:
-        source_image = source_scene.image
+        source_image = source_bands
 
     if getattr(args, "strict_source_budget", True):
         from data import budgeted_source_split

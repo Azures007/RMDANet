@@ -5,7 +5,7 @@ dataset:
   num_classes: 7
 
 training:
-  patch_size: 9
+  patch_size: 7
   batch_size: 32
   eval_batch_size: 256
   eval_interval: 10
@@ -17,6 +17,8 @@ training:
   optimizer_type: sgd
   constant_lr: true
   input_normalization: scale
+  backbone_class: SSSE_Houston
+  band_subset: 'first:48'
   source_samples_per_class: 180
   source_budget_train_fraction: 1.0
   source_train_ratio: 0.38

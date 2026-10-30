@@ -139,6 +139,18 @@ def robust_scene_normalize(image: np.ndarray, mode: str = "l2") -> np.ndarray:
     return np.asarray(image, dtype=np.float32)
 
 
+def select_band_subset(image: np.ndarray, spec: str) -> np.ndarray:
+    """Select a band subset: "first:N" or a comma separated index list."""
+    spec = str(spec or "").strip()
+    if not spec:
+        return image
+    if spec.startswith("first:"):
+        count = int(spec.split(":", 1)[1])
+        return image[..., :count]
+    indices = [int(item) for item in spec.split(",") if item.strip()]
+    return image[..., indices]
+
+
 def compute_log_amplitude(image: np.ndarray) -> np.ndarray:
     """Per-pixel log spectral magnitude, robustly standardized per scene.
 

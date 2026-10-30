@@ -67,8 +67,17 @@ def main() -> None:
     mode = str(getattr(t, "input_normalization", "") or "band")
     src = load_source_scene(t.data_path, t.source_name, t.num_classes, normalize_mode=mode)
     target = load_target_image_only(t.data_path, t.target_name, normalize_mode=mode)
+    source_bands = src.image
+    target_bands = target.image
+    band_subset = str(getattr(t, "band_subset", "") or "")
+    if band_subset:
+        from data import select_band_subset
+
+        source_bands = select_band_subset(source_bands, band_subset)
+        target_bands = select_band_subset(target_bands, band_subset)
+        print(f"[FINAL EVAL] band subset {band_subset!r} -> {source_bands.shape[-1]} bands")
     aligned, _ = align_target_bands(
-        src.image, target.image, strength=t.band_alignment_strength,
+        source_bands, target_bands, strength=t.band_alignment_strength,
         renormalize=mode == "l2",
     )
     backbone_name = str(getattr(t, "backbone_class", "SSSE_test") or "SSSE_test")

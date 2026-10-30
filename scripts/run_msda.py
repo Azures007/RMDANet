@@ -44,6 +44,8 @@ def get_args(options):
         args.reliab_pseudo_weight = options.reliab_weight
     if options.backbone_class:
         args.backbone_class = options.backbone_class
+    if options.band_subset:
+        args.band_subset = options.band_subset
     args.use_gt_target_mask = False
     args.target_gt_mix_ratio = 0.0
     args.diagnostic_target_oa = False
@@ -75,6 +77,12 @@ def main():
         type=str,
         default="",
         help="Official HybridSN variant: SSSE / SSSE_test / SSSE_Houston.",
+    )
+    parser.add_argument(
+        "--band-subset",
+        type=str,
+        default="",
+        help='Band subset for the literature tasks: "first:N" or "0,1,2,...".',
     )
     parser.add_argument(
         "--reliab-pseudo",
