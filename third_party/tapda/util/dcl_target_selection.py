@@ -452,7 +452,8 @@ def compute_target_contrastive_loss(
     selection_scores=None,
     per_class_topk=None,
     prototype_filter_projections=None,
-    source_prototype_state=None
+    source_prototype_state=None,
+    return_indices=False
 ):
     weight = get_target_contrastive_weight(ep, args)
     zero = student_proj.new_tensor(0.0)
@@ -506,6 +507,8 @@ def compute_target_contrastive_loss(
     stats['selected'] = int(selected_indices.numel())
     stats['selected_classes'] = selection_metadata['selected_classes']
     stats['selected_per_class'] = selection_metadata['selected_per_class']
+    if return_indices:
+        stats['selected_indices'] = selected_indices
     stats['prototype_filter'] = selection_metadata['prototype_filter']
     stats['prototype_before'] = selection_metadata['prototype_before']
     stats['prototype_after'] = selection_metadata['prototype_after']

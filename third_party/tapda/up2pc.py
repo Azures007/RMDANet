@@ -41,6 +41,7 @@ from util.dcl_experiment_utils import (
     update_target_diagnostic_state,
     use_target_class_quota,
 )
+from util.dcl_loss_utils import get_rampup_weight
 from util.utils import *
 
 NUM_CLASSES = 7
@@ -169,6 +170,22 @@ def build_parser():
     eval_group = parser.add_argument_group('Evaluation')
     eval_group.add_argument('--eval_mode', default='ensemble', choices=['f1', 'f2', 'ensemble'],
                             help='prediction head used for reported OA/AA/Kappa')
+
+    ours_group = parser.add_argument_group('Ours: reliability-gated pseudo-label supervision')
+    ours_group.add_argument('--reliab_ce_weight', default=0.0, type=float,
+                            help='maximum weight of the PATS-gated pseudo-label CE (0 disables)')
+    ours_group.add_argument('--reliab_ce_min_prob', default=0.95, type=float,
+                            help='teacher confidence threshold applied on top of the PATS selection')
+    ours_group.add_argument('--reliab_ce_start_epoch', default=10, type=int,
+                            help='epoch to start the pseudo-label CE')
+    ours_group.add_argument('--reliab_ce_ramp_epochs', default=10, type=int,
+                            help='epochs used to linearly ramp up the pseudo-label CE weight')
+    ours_group.add_argument('--proto_anchor_weight', default=0.0, type=float,
+                            help='maximum weight of the source-prototype anchor loss (0 disables)')
+    ours_group.add_argument('--proto_anchor_start_epoch', default=10, type=int,
+                            help='epoch to start the prototype anchor loss')
+    ours_group.add_argument('--proto_anchor_ramp_epochs', default=10, type=int,
+                            help='epochs used to linearly ramp up the prototype anchor weight')
     return parser
 
 
@@ -413,6 +430,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             per_class_topk=dynamic_class_topk,
             prototype_filter_projections=teacher_proj_t,
             source_prototype_state=source_prototype_state,
+            return_indices=True,
         )
         target_contrastive_stats.update(quota_stats)
         contrastive_loss = contrastive_loss_s + contrastive_loss_t
@@ -444,6 +462,43 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             target_labels=label_target_diag,
         )
         all_loss = loss1 + loss2 + bnm_loss_a + contrastive_loss
+
+        # ---- Ours: PATS-gated pseudo-label CE (M1) + source-prototype anchor (M3) ----
+        reliab_ce_weight = get_rampup_weight(
+            ep, args.reliab_ce_start_epoch, args.reliab_ce_ramp_epochs, args.reliab_ce_weight
+        )
+        proto_anchor_weight = get_rampup_weight(
+            ep, args.proto_anchor_start_epoch, args.proto_anchor_ramp_epochs,
+            args.proto_anchor_weight
+        )
+        pats_indices = target_contrastive_stats.get('selected_indices')
+        if ((reliab_ce_weight > 0 or proto_anchor_weight > 0)
+                and pats_indices is not None and pats_indices.numel() > 0):
+            with torch.no_grad():
+                pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
+                pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
+                confident = pats_probs >= args.reliab_ce_min_prob
+            if confident.any():
+                sel_idx = pats_indices[confident]
+                sel_labels = pats_labels[confident]
+                sel_probs = pats_probs[confident]
+                if reliab_ce_weight > 0:
+                    ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
+                    rel_ce = (ce_all * sel_probs).sum() / sel_probs.sum().clamp_min(1e-6)
+                    all_loss = all_loss + reliab_ce_weight * rel_ce
+                if proto_anchor_weight > 0:
+                    proto_bank = source_prototype_state.get('prototypes')
+                    proto_seen = source_prototype_state.get('seen')
+                    if proto_bank is not None and proto_seen is not None:
+                        valid_class = proto_seen[sel_labels] > 0
+                        if valid_class.any():
+                            proj = F.normalize(
+                                student_proj_t[sel_idx][valid_class].float(), dim=1
+                            )
+                            anchor = 1.0 - F.cosine_similarity(
+                                proj, proto_bank[sel_labels[valid_class]], dim=1
+                            )
+                            all_loss = all_loss + proto_anchor_weight * anchor.mean()
 
         if args.log_results:
             wandb.log({f'{seed}_A_loss': all_loss})
