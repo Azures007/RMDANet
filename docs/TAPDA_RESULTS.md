@@ -130,6 +130,20 @@ TAPDA 的 HyRANK 脚本由 `tools/make_tapda_hyrank.py` 从 `up2pc.py` 生成
 ### M4：CORAL 二阶对齐
 
 `--coral_weight`（默认 0）：在 projection 特征上计算源/目标协方差差（batch 级）。
+
+| 组合 | Pavia 均值 | Houston 均值 |
+|---|---|---|
+| **M1 单独** | **92.16** | **79.82** |
+| M1 + CORAL 0.1 | 90.36（−1.80） | 80.30（+0.48） |
+
+结论：**有害（Pavia）**，与 M2/M3 同一模式——在 PATS 特征上追加约束会破坏 TAPDA 的平衡。
+据此跳过 M5（CCA）、M6（LMMD），直接测试机制不同的 **M7 PRAT（输入域频域增强）**。
+
+### M7：PRAT 频域幅度迁移
+
+`--prat_prob` / `--prat_strength`（默认关闭）：对目标 batch 做空间域 FFT，
+保留目标相位、把目标幅度与源 batch 平均幅度混合（强度 `strength`），
+再逆变换回图像空间。属于**输入域增强**，不改损失/特征约束。
 待实测。
 
 ## 3. 结论
