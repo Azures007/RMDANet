@@ -2,14 +2,14 @@
 
 TAPDA runs all datasets/seeds defined by the module-level ``SEEDS`` constant:
 
-    for dataset_index, seed in enumerate(SEEDS):
+    for dataset_index, seed in enumerate(SEEDS):        # original
+    for dataset_index, seed in enumerate(SEEDS[:1]):    # after this patch
 
-This patch slices that constant so that only the first ``--num-seeds`` entries
-are used, which makes single-seed ablations fast while keeping the original
-protocol available (``--num-seeds 10`` restores it).  Idempotent.
+This patch rewrites that slice so only the first ``--num-seeds`` entries are
+used (``--num-seeds 10`` restores the full protocol).  Idempotent.
 
 Usage:
-    python tools/patch_tapda_single_seed.py --tapda-dir /root/autodl-tmp/tapda --num-seeds 1
+    python tools/patch_tapda_single_seed.py --tapda-dir /root/autodl-tmp/tapda --num-seeds 5
 """
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ import argparse
 import re
 from pathlib import Path
 
-LOOP_PATTERN = re.compile(r"enumerate\(\s*(?P<name>SEEDS|seeds|SEED_LIST|seed_list)\s*\)")
+LOOP_PATTERN = re.compile(
+    r"enumerate\(\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?P<slice>\[[^\]]*\])?\s*\)"
+)
 
 
 def main() -> None:
@@ -32,21 +34,26 @@ def main() -> None:
         raise FileNotFoundError(path)
     text = path.read_text(encoding="utf8")
 
-    match = LOOP_PATTERN.search(text)
-    if match is None:
+    matches = [
+        match
+        for match in LOOP_PATTERN.finditer(text)
+        if "seed" in match.group("name").lower()
+    ]
+    if not matches:
         raise RuntimeError(
-            "seed loop 'enumerate(SEEDS)' not found; run: grep -n enumerate up2pc.py"
+            "seed loop 'enumerate(<seed list>)' not found; run: grep -n enumerate up2pc.py"
         )
+    match = matches[0]
     name = match.group("name")
     replacement = f"enumerate({name}[:{options.num_seeds}])"
-    if replacement in text:
+    if match.group(0) == replacement:
         print(f"already limited to {options.num_seeds} seed(s):", replacement)
         return
 
     text = text[: match.start()] + replacement + text[match.end():]
     path.write_text(text, encoding="utf8")
     print(f"patched: {path}")
-    print(f" - seed loop is now: for ... in {replacement}")
+    print(f" - seed loop is now: {replacement}")
     for number, line in enumerate(path.read_text(encoding="utf8").splitlines(), 1):
         if replacement in line:
             print(f"   line {number}: {line.strip()}")
