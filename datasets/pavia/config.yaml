@@ -49,9 +49,9 @@ uda:
   lmmd_start_epoch: 25
   lmmd_warm_epochs: 8
   # pseudo-label gates
-  pseudo_confidence: 0.95
-  reliability_threshold: 0.45
-  pseudo_margin: 0.10
+  pseudo_confidence: 0.98
+  reliability_threshold: 0.65
+  pseudo_margin: 0.15
   pseudo_min_per_class: 0
   # module set: CCA + CORAL + LMMD + prototype alignment
   lambda_cca: 0.5
@@ -61,7 +61,7 @@ uda:
   lambda_lmmd: 0.3
   prototype_align_flag: true
   prototype_weight: 0.03
-  prototype_confidence: 0.95
+  prototype_confidence: 0.98
   prototype_temperature: 0.08
   include_target_scale_mi: true
   strict_class_balance_strength: 1.0
@@ -71,7 +71,7 @@ uda:
   prat_style_max: 0.2
   prat_warm_epochs: 23
   # multi-prototype quotas
-  cempa_class_cap: 24
+  cempa_class_cap: 8
   cempa_min_age: 2
   cempa_min_streak: 2
   # strict UDA guards
