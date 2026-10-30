@@ -91,6 +91,30 @@ TAPDA 的 HyRANK 脚本由 `tools/make_tapda_hyrank.py` 从 `up2pc.py` 生成
 结论：**TAPDA 结构不适配 HyRANK**（12 类、176 波段、patch 3）。CLI 调参上限 51.56，
 低于 MSDA 官方复现的 61.12，也低于我们 MSDA 端口 51.83。继续调参无意义。
 
+## 2c. 在 TAPDA 基座上移植 v3.0 模块（tapda-base 分支）
+
+代码位于 `third_party/tapda/`（vendor 自官方 TAPDA，未改动原始逻辑），
+我们的改动以 CLI 开关形式加入，默认全部关闭（等价官方 TAPDA）。
+
+### M1：PATS 门控的伪标签 CE
+
+旧实现（`tools/patch_tapda_reliab.py`）是**独立自选阈值+类配额**，多 seed 无稳定增益；
+新实现（`up2pc.py` / `houston13218.py` 的 `--reliab_ce_weight`）**只监督 TAPDA PATS
+已选中的样本**，再叠加教师置信度阈值，权重按 epoch ramp。
+
+| 数据集 | 原版 seed0/seed1（均值） | M1 seed0/seed1（均值） | Δ |
+|---|---|---|---|
+| Pavia | 85.75 / 90.97（88.36） | 92.33 / 91.98（92.16） | **+3.80** |
+| Houston | 80.83 / 78.96（79.90） | 80.63 / 79.00（79.82） | −0.08（持平） |
+
+配置：`--reliab_ce_weight 0.05 --reliab_ce_min_prob 0.95 --reliab_ce_start_epoch 10
+--reliab_ce_ramp_epochs 10`。
+
+### M3：源原型锚定损失
+
+`--proto_anchor_weight`（默认 0）：`L = mean(1 - cos(student_proj_t, source_proto[pseudo]))`，
+只对 PATS 选中且原型已见类的样本计算。待验证。
+
 ## 3. 结论
 
 1. **模块有效性与基座强度强相关**：
