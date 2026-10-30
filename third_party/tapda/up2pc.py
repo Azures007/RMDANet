@@ -18,6 +18,7 @@ import util.utils as utils
 from loss.contrastive_loss import SupConLoss
 from modules.HybridSN import SSSE_Contrastive
 from modules.reliability_encoder import ReliabilityEncoderContrastive
+from modules.cosine_head import CosineClassifierHead
 from modules.basenet import *
 from modules.teacher_cl import EMATeacher
 from util.dcl_experiment_utils import (
@@ -86,6 +87,8 @@ def build_parser():
                             help='half width of the spatial patch; patch_size = 2 * halfwidth + 1')
     data_group.add_argument('--backbone_impl', default='ssse', choices=['ssse', 'reliability'],
                             help='feature extractor: TAPDA SSSE (ssse) or v3.0 DualReliabilityEncoder (reliability)')
+    data_group.add_argument('--classifier_impl', default='res', choices=['res', 'cosine'],
+                            help='dual-classifier head: TAPDA ResClassifier (res) or v3.0 cosine head (cosine)')
 
     logging_group = parser.add_argument_group('Experiment logging')
     logging_group.add_argument('--log_results', action='store_true',
@@ -370,10 +373,14 @@ def initialize_models_and_optimizers(n_bands, patch_size, num_classes, device, a
             patch_size=patch_size,
             n_classes=num_classes,
         ).to(device)
-    F1 = ResClassifier(num_classes, training=True)
-    F2 = ResClassifier(num_classes, training=True)
-    F1.apply(weights_init)
-    F2.apply(weights_init)
+    if getattr(args, 'classifier_impl', 'res') == 'cosine':
+        F1 = CosineClassifierHead(num_classes, feature_dim=152, training=True)
+        F2 = CosineClassifierHead(num_classes, feature_dim=152, training=True)
+    else:
+        F1 = ResClassifier(num_classes, training=True)
+        F2 = ResClassifier(num_classes, training=True)
+        F1.apply(weights_init)
+        F2.apply(weights_init)
 
     F1_teacher = EMATeacher(G, F1, alpha=args.alpha, pseudo_label_weight=args.pseudo_label_weight).to(device)
     contrastive_loss_func = SupConLoss(
