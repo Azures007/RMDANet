@@ -17,6 +17,7 @@ import torch.nn.functional as F
 import util.utils as utils
 from loss.contrastive_loss import SupConLoss
 from modules.HybridSN import SSSE_Contrastive
+from modules.reliability_encoder import ReliabilityEncoderContrastive
 from modules.basenet import *
 from modules.teacher_cl import EMATeacher
 from util.dcl_experiment_utils import (
@@ -83,6 +84,8 @@ def build_parser():
     data_group = parser.add_argument_group('Data and model shape')
     data_group.add_argument('--halfwidth', default=4, type=int,
                             help='half width of the spatial patch; patch_size = 2 * halfwidth + 1')
+    data_group.add_argument('--backbone_impl', default='ssse', choices=['ssse', 'reliability'],
+                            help='feature extractor: TAPDA SSSE (ssse) or v3.0 DualReliabilityEncoder (reliability)')
 
     logging_group = parser.add_argument_group('Experiment logging')
     logging_group.add_argument('--log_results', action='store_true',
@@ -355,11 +358,18 @@ def create_data_loaders(train_x, train_y, test_x, test_y, test_x_s, test_y_s, ba
 
 
 def initialize_models_and_optimizers(n_bands, patch_size, num_classes, device, args):
-    G = SSSE_Contrastive(
-        input_channels=n_bands,
-        patch_size=patch_size,
-        n_classes=num_classes,
-    ).to(device)
+    if getattr(args, 'backbone_impl', 'ssse') == 'reliability':
+        G = ReliabilityEncoderContrastive(
+            input_channels=n_bands,
+            patch_size=patch_size,
+            n_classes=num_classes,
+        ).to(device)
+    else:
+        G = SSSE_Contrastive(
+            input_channels=n_bands,
+            patch_size=patch_size,
+            n_classes=num_classes,
+        ).to(device)
     F1 = ResClassifier(num_classes, training=True)
     F2 = ResClassifier(num_classes, training=True)
     F1.apply(weights_init)

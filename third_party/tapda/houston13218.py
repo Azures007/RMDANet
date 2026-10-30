@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import util.utils as utils
 from modules.basenet import *
 from modules.HybridSN import SSSE_Contrastive
+from modules.reliability_encoder import ReliabilityEncoderContrastive
 from loss.contrastive_loss import SupConLoss
 from util.dcl_experiment_utils import (
     TeeLogger,
@@ -82,6 +83,8 @@ def build_parser():
     data_group = parser.add_argument_group('Data and model shape')
     data_group.add_argument('--halfwidth', default=3, type=int,
                             help='half width of the spatial patch; patch_size = 2 * halfwidth + 1')
+    data_group.add_argument('--backbone_impl', default='ssse', choices=['ssse', 'reliability'],
+                            help='feature extractor: TAPDA SSSE (ssse) or v3.0 DualReliabilityEncoder (reliability)')
 
     # 实验输出：本地日志始终开启，wandb 作为可选远程记录。
     logging_group = parser.add_argument_group('Experiment logging')
@@ -374,10 +377,15 @@ def create_data_loaders(trainX, trainY, testX, testY, testX_s, testY_s, batch_si
 
 def initialize_models_and_optimizers(N_BANDS, patch_size, num_classes, DEV, args):
     """初始化特征提取器、双分类器、EMA teacher、对比损失和优化器。"""
-    G = SSSE_Contrastive(input_channels=N_BANDS,
-                         patch_size=patch_size,
-                         n_classes=num_classes,
-                         is_houston=True).to(DEV)
+    if getattr(args, 'backbone_impl', 'ssse') == 'reliability':
+        G = ReliabilityEncoderContrastive(input_channels=N_BANDS,
+                                          patch_size=patch_size,
+                                          n_classes=num_classes).to(DEV)
+    else:
+        G = SSSE_Contrastive(input_channels=N_BANDS,
+                             patch_size=patch_size,
+                             n_classes=num_classes,
+                             is_houston=True).to(DEV)
     F1 = ResClassifier(num_classes, training=True)
     F2 = ResClassifier(num_classes, training=True)
     F1.apply(weights_init)
