@@ -50,6 +50,13 @@ def get_args(options):
     args.target_gt_mix_ratio = 0.0
     args.diagnostic_target_oa = False
     args.skip_final_evaluation = True
+    if options.data_path:
+        args.data_path = options.data_path
+    if not Path(args.data_path).is_dir():
+        raise FileNotFoundError(
+            f"Resolved data_path does not exist: {args.data_path!r}. "
+            "Pass --data-path explicitly if the layout differs."
+        )
     return args
 
 
@@ -62,6 +69,11 @@ def main():
         default="/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets",
     )
     parser.add_argument("--out-root", default=str(ROOT / "results_msda"))
+    parser.add_argument(
+        "--data-path",
+        default="",
+        help="Explicit dataset directory; overrides --data-root/<dataset>.",
+    )
     parser.add_argument("--msda-dir", default="")
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--workers", type=int, default=4)
