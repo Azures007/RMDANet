@@ -20,6 +20,7 @@ from modules.HybridSN import SSSE_Contrastive
 from modules.reliability_encoder import ReliabilityEncoderContrastive
 from modules.cosine_head import CosineClassifierHead
 from modules.prat_full import PhaseReliabilityResidualAmplitudeTransfer
+from modules.memory_full import ReliabilityPrototypeMemory
 from loss.contrastive_loss import SupConLoss
 from util.dcl_experiment_utils import (
     TeeLogger,
@@ -260,6 +261,20 @@ def build_parser():
                             help='epoch to start the full PRAT augmentation')
     ours_group.add_argument('--prat_full_ema', default=0.96, type=float,
                             help='EMA momentum of the target amplitude reference in full PRAT')
+    ours_group.add_argument('--memory_reliab', action='store_true', default=False,
+                            help='replace the M1 sample gate with the v3.0 reliability memory')
+    ours_group.add_argument('--memory_min_conf', default=0.95, type=float,
+                            help='confidence threshold applied on top of the memory selection')
+    ours_group.add_argument('--memory_reliab_threshold', default=0.22, type=float,
+                            help='reliability threshold of the v3.0 memory')
+    ours_group.add_argument('--memory_class_cap', default=18, type=int,
+                            help='per-class cap of the v3.0 memory selection')
+    ours_group.add_argument('--memory_margin', default=0.055, type=float,
+                            help='margin gate of the v3.0 memory')
+    ours_group.add_argument('--memory_prob_momentum', default=0.92, type=float,
+                            help='probability memory momentum')
+    ours_group.add_argument('--memory_feature_momentum', default=0.94, type=float,
+                            help='feature memory momentum')
     return parser
 
 
@@ -430,14 +445,29 @@ def load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_
     }
 
 
+class IndexedTensorDataset(torch.utils.data.Dataset):
+    """Tensor dataset that also returns the sample index (needed by the memory)."""
+
+    def __init__(self, data, target):
+        self.data = data
+        self.target = target
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        return self.data[index], self.target[index], index
+
+
 def create_data_loaders(trainX, trainY, testX, testY, testX_s, testY_s, batch_size):
     """构造源域训练、目标域无标签训练和测试 DataLoader。"""
     test_source_dataset = TensorDataset(torch.tensor(testX_s), torch.tensor(testY_s))
     train_dataset = TensorDataset(torch.tensor(trainX), torch.tensor(trainY))
     test_dataset = TensorDataset(torch.tensor(testX), torch.tensor(testY))
+    indexed_test_dataset = IndexedTensorDataset(torch.tensor(testX), torch.tensor(testY))
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-    train_tar_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    train_tar_loader = DataLoader(indexed_test_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     source_test_loader = DataLoader(test_source_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
@@ -516,7 +546,7 @@ def initialize_models_and_optimizers(N_BANDS, patch_size, num_classes, DEV, args
 def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 contrastive_loss_func, optimizer_g, optimizer_f,
                 batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-                source_prototype_state, prat_full=None):
+                source_prototype_state, prat_full=None, memory=None):
     iter_source, iter_target = iter(train_loader), iter(train_tar_loader)
     criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing).to(DEV)
     G.train()
@@ -531,7 +561,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if batch_idx % len(train_tar_loader) == 0:
             iter_target = iter(train_tar_loader)
         data_source, label_source = next(iter_source)
-        data_target, label_target = next(iter_target)
+        data_target, label_target, target_ids = next(iter_target)
         if args.cuda:
             data1, target1 = data_source.cuda(), label_source.cuda()
             data2 = data_target.cuda()
@@ -552,9 +582,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         data = Variable(torch.cat((data1, data2), 0))
         target1 = Variable(target1)
         F1_teacher.update_weights(G, F1, ep * num_iter + batch_idx)
-        F1_pseudo_label_t, F1_pseudo_prob_t, _, teacher_proj_t = F1_teacher(data2)
+        F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t, teacher_proj_t = F1_teacher(data2)
 
-        _, _, _, teacher_proj_s = F1_teacher(data1)
+        _, _, teacher_feat_s, teacher_proj_s = F1_teacher(data1)
         _, student_proj_s = G(data1)
         contrastive_loss_s = args.source_contrastive_weight * compute_projection_contrastive_loss(
             teacher_proj_s,
@@ -564,6 +594,18 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         )
         update_source_prototype_state(source_prototype_state, teacher_proj_s, target1, num_classes, args)
         student_feat_t, student_proj_t = G(data2)
+        memory_batch = None
+        if memory is not None:
+            with torch.no_grad():
+                teacher_logits_mem, _ = F1_teacher.f(teacher_feat_t)
+                teacher_probs_mem = torch.softmax(teacher_logits_mem, dim=1)
+                student_logits_mem, _ = F1(student_feat_t.detach())
+                student_probs_mem = torch.softmax(student_logits_mem, dim=1)
+                memory.update_source_prototypes(teacher_feat_s, target1)
+            memory_batch = memory.update(
+                target_ids.to(DEV), teacher_probs_mem, student_probs_mem,
+                teacher_feat_t.detach(),
+            )
         dynamic_class_topk = None
         quota_stats = {
             'quota_mode': 'none',
@@ -641,6 +683,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             args.proto_anchor_weight
         )
         pats_indices = target_contrastive_stats.get('selected_indices')
+        if memory_batch is not None:
+            pats_indices = memory_batch.stable_mask.nonzero(as_tuple=True)[0]
         if ((reliab_ce_weight > 0 or proto_anchor_weight > 0)
                 and pats_indices is not None and pats_indices.numel() > 0):
             with torch.no_grad():
@@ -919,6 +963,23 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             ema_momentum=args.prat_full_ema,
             mode=args.prat_full_mode,
         ).to(DEV)
+    memory = None
+    if getattr(args, 'memory_reliab', False):
+        memory = ReliabilityPrototypeMemory(
+            num_samples=len_tar_dataset,
+            num_classes=num_classes,
+            feature_dim=152,
+            neighbor_ids=torch.zeros(len_tar_dataset, 0, dtype=torch.long),
+            device=DEV,
+            probability_momentum=args.memory_prob_momentum,
+            feature_momentum=args.memory_feature_momentum,
+            reliability_threshold=args.memory_reliab_threshold,
+            pseudo_confidence=args.memory_min_conf,
+            pseudo_margin=args.memory_margin,
+            class_cap=args.memory_class_cap,
+            use_spatial=False,
+            use_guard=False,
+        )
 
     # 训练阶段：保持原有 A/B/C 三阶段更新与最终 epoch 测试时机。
     epoch_train_start = time.time()
@@ -936,7 +997,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             contrastive_loss_func, optimizer_g, optimizer_f,
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-            source_prototype_state, prat_full
+            source_prototype_state, prat_full, memory
         )
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
