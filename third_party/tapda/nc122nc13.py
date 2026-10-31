@@ -223,6 +223,12 @@ def build_parser():
                             help='minimum teacher top1-top2 margin (0 disables)')
     ours_group.add_argument('--m1_class_adaptive', default=0.0, type=float,
                             help='rare-class threshold relaxation (0 disables)')
+    ours_group.add_argument('--m1_soft_label', action='store_true', default=False,
+                            help='use the teacher distribution as a soft target')
+    ours_group.add_argument('--reliab_ce_balance', default='none', choices=['none', 'inverse', 'sqrt'],
+                            help='class-balanced weighting of the M1 loss')
+    ours_group.add_argument('--m1_source_threshold', default=0.0, type=float,
+                            help='per-class threshold adjustment from source per-class accuracy')
     return parser
 
 
@@ -639,6 +645,18 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     )[pats_indices]
                     top2 = teacher_prob_mg.topk(2, dim=1).values
                     confident = confident & ((top2[:, 0] - top2[:, 1]) >= args.m1_margin_gate)
+                if args.m1_source_threshold > 0:
+                    with torch.no_grad():
+                        source_pred = output_s1.detach().argmax(dim=1)
+                        source_correct = source_pred.eq(target1.long())
+                        class_acc = torch.zeros(num_classes, device=source_correct.device)
+                        for class_id in range(num_classes):
+                            mask = target1.long().eq(class_id)
+                            if int(mask.sum().item()) > 0:
+                                class_acc[class_id] = source_correct[mask].float().mean()
+                        adjust = 1.0 - class_acc.clamp(0.0, 1.0)
+                        class_thr = args.reliab_ce_min_prob - args.m1_source_threshold * adjust
+                        confident = pats_probs >= class_thr[pats_labels]
                 if args.m1_topk_ratio > 0 and pats_probs.numel() > 0:
                     topk = max(1, int(round(args.m1_topk_ratio * pats_probs.numel())))
                     confident = pats_probs >= pats_probs.topk(topk).values.min()
@@ -663,6 +681,15 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if args.reliab_ce_balance != 'none' and sel_labels.numel() > 0:
+                    class_counts = torch.bincount(sel_labels.long(), minlength=num_classes).float()
+                    class_freq = class_counts[sel_labels.long()].clamp_min(1.0)
+                    if args.reliab_ce_balance == 'inverse':
+                        class_weight = 1.0 / class_freq
+                    else:
+                        class_weight = 1.0 / class_freq.sqrt()
+                    class_weight = class_weight / class_weight.mean().clamp_min(1e-6)
+                    sel_weight = sel_probs * class_weight
                 if args.m1_class_cap > 0 and sel_idx.numel() > 0:
                     keep = torch.zeros_like(sel_labels, dtype=torch.bool)
                     for class_id in sel_labels.unique().tolist():
@@ -701,7 +728,16 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         width = args.m1_gate_k * ref_std
                         gate = min(max((maturity - (ref_mean - width)) / max(width, 1e-6), 0.0), 1.0)
                     reliab_ce_weight = reliab_ce_weight * gate
-                ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
+                if args.m1_soft_label:
+                    with torch.no_grad():
+                        teacher_logits_soft, _ = F1_teacher.f(teacher_feat_t)
+                        teacher_prob_soft = torch.softmax(
+                            teacher_logits_soft.detach().float(), dim=1
+                        )[sel_idx]
+                    log_student = F.log_softmax(output_t1[sel_idx].float(), dim=1)
+                    ce_all = -(teacher_prob_soft * log_student).sum(dim=1)
+                else:
+                    ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
                 rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
                 all_loss = all_loss + reliab_ce_weight * rel_ce
 
