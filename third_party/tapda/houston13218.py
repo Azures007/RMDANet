@@ -805,7 +805,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             if args.cnt_shift_weight > 0:
                 value = classwise_cnt_shift_loss(
                     source_prototype_state['prototypes'], source_prototype_state['seen'],
-                    student_proj_t, F1_pseudo_label_t.detach(), F1_pseudo_prob_t.detach(),
+                    student_feat_t, F1_pseudo_label_t.detach(), F1_pseudo_prob_t.detach(),
                     num_classes)
                 screen_values['S4_cnt_shift'] = value
                 all_loss = all_loss + args.cnt_shift_weight * value
