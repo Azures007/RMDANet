@@ -1701,6 +1701,15 @@ def run_epoch(
     })
     return metrics
 
+def _make_backbone(**kwargs):
+    """Dispatch the feature extractor: v3.0 encoder or TAPDA SSSE (E experiment)."""
+    if str(kwargs.get("backbone", "ours")) == "ssse":
+        from ssse_model import SSSEAdapter
+        return SSSEAdapter(**kwargs)
+    kwargs.pop("patch_size", None)
+    return DualReliabilityEncoder(**kwargs)
+
+
 def train(args: argparse.Namespace) -> dict[str, Any]:
     args = apply_ablation_profile(args)
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0)) != 0 or args.diagnostic_target_oa:
@@ -1773,7 +1782,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     if bool(getattr(args, "collapse_guard_flag", False)):
         print("[config] collapse guard ON")
 
-    student = DualReliabilityEncoder(
+    student = _make_backbone(
         bands=loaders["bands"],
         num_classes=loaders["num_classes"],
         projection_dim=args.projection_dim,

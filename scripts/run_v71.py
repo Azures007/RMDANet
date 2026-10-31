@@ -32,6 +32,7 @@ def get_args(options):
     args.gpu = options.gpu
     args.ssf_mode = options.mode
     args.num_workers = options.workers
+    args.backbone = options.backbone
     if options.epochs is not None:args.epochs = options.epochs
     if options.steps_per_epoch is not None:args.steps_per_epoch = options.steps_per_epoch
     if options.batch_size is not None:args.batch_size = options.batch_size
@@ -77,6 +78,7 @@ def main():
     p.add_argument('--data-root',default='/root/autodl-tmp/Datasets')
     p.add_argument('--out-root',default=str(ROOT/'results_v71'))
     p.add_argument('--gpu',type=int,default=0)
+    p.add_argument('--backbone',choices=['ours','ssse'],default='ours')
     p.add_argument('--workers',type=int,default=4)
     p.add_argument('--epochs',type=int)
     p.add_argument('--steps-per-epoch',type=int)
