@@ -79,3 +79,24 @@ Beyond the two mechanisms, we report a systematic same-protocol, same-seed study
 
 Experiments on three cross-scene tasks (Pavia, Houston, YRD) under a fixed 180-labels-per-class budget, five seeds, and identical evaluation protocols show that RGS improves Pavia by [[+3.80]] and Houston by [[+1.23]] over the reproduced baseline, while the reproduced baseline itself already exceeds the published TAPDA numbers on YRD (95.09 vs 94.34).
 
+## Draft: Method sections (English)
+
+### 3.2 Base: contrastive-distillation UDA
+Let $f_\theta$ be an EMA teacher of the student $(g, h)$ (encoder plus dual classifiers), and let $\mathcal{B}_t$ be a target minibatch. The base framework (i) aligns source and target features adversarially through the two classifiers, (ii) maximises the batch nuclear norm of target predictions, and (iii) performs target contrastive distillation over a selected subset $S_b\subseteq\mathcal{B}_t$ obtained by PATS (per-class top-k with source-prototype agreement). The selected subset is used only in the contrastive term.
+
+### 3.3 Mechanism 1: reliability-gated supervision (RGS)
+We reuse the same selected subset but treat it as a supervision signal:
+$$\mathcal{L}_{\mathrm{RGS}} = \lambda(e)\,\frac{\sum_{i\in\mathcal{G}} p_i\,\mathrm{CE}\big(h(g(x_i^t)),\,\hat y_i\big)}{\sum_{i\in\mathcal{G}} p_i},\qquad
+\mathcal{G}=\{i\in S_b:\ p_i\ge\tau\},$$
+with teacher confidence $p_i$, threshold $\tau$, and a linear ramp $\lambda(e)$ over the second half of training. RGS adds no parameters and reuses the classifiers already computed in the same iteration.
+
+### 3.4 Mechanism 2: class-aware gating for long-tailed targets
+Three variants share the same interface:
+- **M2-C (class-adaptive threshold)**: $\tau_c=\tau-\alpha\,(1-\pi_c/\max_c\pi_c)$, where $\pi_c$ is the running target pseudo-label prior; rare classes are gated more permissively.
+- **M2-B (inverse-prior quota)**: at most $q_c=\lceil q\cdot\bar\pi/\pi_c\rceil$ samples per class enter $\mathcal{G}$, which prevents frequent classes from dominating the supervised subset.
+- **M2-S (soft-label distillation)**: replace the one-hot CE by $-\sum_c \hat p_c\log p_\theta(c|x)$ using the full teacher distribution, reducing hard-label confirmation bias.
+- **M2-T (trimmed robust loss)**: drop the top-$\rho$ fraction of per-sample losses in $\mathcal{G}$, suppressing noisy pseudo-labels.
+
+### 3.5 Selection-bias analysis (motivation)
+Let $\pi_c$ be the target prior and $q_c^{(k)}$ the probability that a class-$c$ sample enters the top-$k$ selection. PATS thresholds are global, so $q_c^{(k)}$ is increasing in $\pi_c$ and decreasing in the class-conditional loss. Consequently the selected subset over-represents large classes and easy samples, and a purely contrastive objective on $S_b$ cannot correct this bias. RGS adds a de-biased supervised term whose expectation is $\sum_c \pi_c\,\mathbb{E}[\ell_c]$ restricted to $\mathcal{G}$; the class-aware mechanisms in Section 3.4 further rebalance the per-class mass of $\mathcal{G}$. [[Formal proposition and proof to be completed once M2 is fixed.]]
+
