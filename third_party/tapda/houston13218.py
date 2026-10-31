@@ -305,6 +305,12 @@ def build_parser():
                             help='mean confidence above which the maturity gate is 1')
     ours_group.add_argument('--m1_class_cap', default=0, type=int,
                             help='per-class cap of the M1 selected samples (0 disables, v3.0 SafetyFeedback)')
+    ours_group.add_argument('--m1_soft_label', action='store_true', default=False,
+                            help='use the full teacher distribution as a soft target (M2-S distillation)')
+    ours_group.add_argument('--m1_trim_ratio', default=0.0, type=float,
+                            help='drop the top fraction of the M1 per-sample losses (M2-T trimmed robust loss)')
+    ours_group.add_argument('--m1_class_adaptive', default=0.0, type=float,
+                            help='lower the M1 threshold for rare pseudo-label classes (M2-C class-adaptive gate)')
     return parser
 
 
@@ -720,7 +726,18 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             with torch.no_grad():
                 pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
                 pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
-                confident = pats_probs >= args.reliab_ce_min_prob
+                if args.m1_class_adaptive > 0 and pats_labels.numel() > 0:
+                    prior_counts = torch.bincount(
+                        F1_pseudo_label_t.detach().long(), minlength=num_classes
+                    ).float()
+                    priors = prior_counts / prior_counts.sum().clamp_min(1.0)
+                    max_prior = priors.max().clamp_min(1e-6)
+                    adaptive_thr = args.reliab_ce_min_prob - args.m1_class_adaptive * (
+                        1.0 - priors[pats_labels] / max_prior
+                    )
+                    confident = pats_probs >= adaptive_thr
+                else:
+                    confident = pats_probs >= args.reliab_ce_min_prob
                 if args.reliab_ce_agreement:
                     agreement = (output_t1[pats_indices].argmax(dim=1)
                                  == output_t2[pats_indices].argmax(dim=1))
@@ -757,7 +774,23 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     class_weight = class_weight / class_weight.mean().clamp_min(1e-6)
                     sel_weight = sel_probs * class_weight
                 if reliab_ce_weight > 0:
-                    ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
+                    if args.m1_soft_label:
+                        with torch.no_grad():
+                            teacher_logits_m1, _ = F1_teacher.f(teacher_feat_t)
+                            teacher_prob_m1 = torch.softmax(
+                                teacher_logits_m1.detach().float(), dim=1
+                            )
+                        log_student = F.log_softmax(output_t1[sel_idx].float(), dim=1)
+                        ce_all = -(teacher_prob_m1[sel_idx] * log_student).sum(dim=1)
+                    else:
+                        ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
+                    if args.m1_trim_ratio > 0 and ce_all.numel() > 2:
+                        drop = max(1, int(ce_all.numel() * args.m1_trim_ratio))
+                        if drop < ce_all.numel():
+                            _, drop_idx = torch.topk(ce_all.detach(), drop)
+                            keep = torch.ones_like(ce_all, dtype=torch.bool)
+                            keep[drop_idx] = False
+                            ce_all, sel_weight = ce_all[keep], sel_weight[keep]
                     rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
                     all_loss = all_loss + reliab_ce_weight * rel_ce
                 if proto_anchor_weight > 0:
