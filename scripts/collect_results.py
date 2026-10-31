@@ -52,6 +52,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("root")
     parser.add_argument("--out", default="results_comparison/summary")
+    parser.add_argument("--latex", action="store_true", help="also emit a LaTeX table")
     args = parser.parse_args()
     root = Path(args.root).expanduser().resolve()
     out_base = Path(args.out)
@@ -89,6 +90,24 @@ def main() -> None:
             f"| {row['method']} | {row['OA']} | {row['AA']} | {row['Kappa']} | {row['file']} |"
         )
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if args.latex:
+        tex_path = out_base.with_suffix(".tex")
+        lines = [
+            r"\begin{table}[t]",
+            r"\centering",
+            r"\caption{Quantitative comparison under the same protocol.}",
+            r"\begin{tabular}{lccc}",
+            r"\hline",
+            r"Method & OA & AA & Kappa \\\\",
+            r"\hline",
+        ]
+        for row in rows:
+            lines.append(
+                f"{row['method']} & {row['OA']} & {row['AA']} & {row['Kappa']} \\\\"
+            )
+        lines += [r"\hline", r"\end{tabular}", r"\end{table}", ""]
+        tex_path.write_text("\n".join(lines), encoding="utf-8")
+        print(f"latex table -> {tex_path}")
     print(f"collected {len(rows)} records -> {csv_path} / {md_path}")
 
 

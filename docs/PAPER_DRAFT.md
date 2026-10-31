@@ -100,3 +100,23 @@ Three variants share the same interface:
 ### 3.5 Selection-bias analysis (motivation)
 Let $\pi_c$ be the target prior and $q_c^{(k)}$ the probability that a class-$c$ sample enters the top-$k$ selection. PATS thresholds are global, so $q_c^{(k)}$ is increasing in $\pi_c$ and decreasing in the class-conditional loss. Consequently the selected subset over-represents large classes and easy samples, and a purely contrastive objective on $S_b$ cannot correct this bias. RGS adds a de-biased supervised term whose expectation is $\sum_c \pi_c\,\mathbb{E}[\ell_c]$ restricted to $\mathcal{G}$; the class-aware mechanisms in Section 3.4 further rebalance the per-class mass of $\mathcal{G}$. [[Formal proposition and proof to be completed once M2 is fixed.]]
 
+## Draft: Experiments section (English)
+
+### 4.1 Datasets and protocol
+Three cross-scene HSI adaptation tasks: Pavia (PaviaU -> PaviaC, 7 classes), Houston (Houston13 -> Houston18, 7 classes), and YRD (NC12 -> NC13, 7 classes, 270 bands). For every task the source budget is exactly 180 labelled pixels per class (1133-1260 pixels in total depending on class availability), no source validation split is used, and the target ground truth is opened only once for the final evaluation. All methods share the same target test pixels and class mapping. Results are reported as the mean and standard deviation over five seeds; the reported epoch is the final epoch for every method.
+
+### 4.2 Implementation details
+[[backbone, EMA teacher alpha, batch size, optimizer, epochs x steps, hardware]] RGS threshold tau=0.95 and maximum weight lambda_max=0.05 for Pavia; [[Houston config]]; [[YRD config]].
+
+### 4.3 Comparison with state of the art
+Table 1 reports OA, AA and Kappa on the three tasks. Relative to the reproduced contrastive-distillation baseline, RGS improves Pavia by +3.80 and Houston by +1.23 (with class quota), while on YRD the reproduced baseline already reaches 95.09, above the published 94.34. [[mechanism-2]] adds [[+x.xx]] on [[dataset]].
+
+### 4.4 Ablation study
+We ablate (i) RGS on/off, (ii) the confidence threshold tau in {0.90, 0.93, 0.95, 0.97}, (iii) the maximum weight lambda_max in {0.03, 0.05, 0.10}, (iv) the class-aware mechanisms (M2-B/C/S/T) individually and combined, (v) the Houston class quota, and (vi) the maturity gate. Table 4 summarises the results.
+
+### 4.5 Transferability analysis of generic DA components
+Eleven generic components are added to the same base under the same seeds: cosine classifiers, AdamW recipe, LMMD, CCA, CORAL, full PRAT, reliability memory, backbone substitution, teacher consistency, spectral-view consistency, and class-wise CNT. Ten of them reduce accuracy; we report the exact deltas and discuss the three failure modes (feature-geometry mismatch, pseudo-label noise amplification, and optimisation incompatibility).
+
+### 4.6 Efficiency
+Table 6 reports parameters, FLOPs, per-epoch training time and peak memory for the reproduced baseline, RGS, and MSDA. RGS adds no parameters and one extra classifier evaluation per iteration.
+
