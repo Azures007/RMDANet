@@ -337,6 +337,8 @@ def build_parser():
                             help='reweight teacher probabilities by the estimated target/source prior ratio (D2)')
     ours_group.add_argument('--m1_prior_power', default=0.5, type=float,
                             help='exponent applied to the prior ratio in D2')
+    ours_group.add_argument('--m1_diag', action='store_true', default=False,
+                            help='print unlabeled diagnostics used by the adaptive operator selection')
     return parser
 
 
@@ -816,6 +818,22 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             if reliab_ce_weight > 0 and ep % 10 == 0:
                 print(f"[ours] ep={ep} pats_selected={int(pats_indices.numel())} "
                       f"confident={int(confident.sum())} mean_prob={float(pats_probs.mean()):.3f}")
+                if args.m1_diag and ep % 5 == 0:
+                    with torch.no_grad():
+                        sel_n = int(sel_idx.numel()) if 'sel_idx' in dir() else int(confident.sum())
+                        sel_mean = float(sel_probs.mean()) if 'sel_probs' in dir() else float(pats_probs.mean())
+                        sel_std = float(sel_probs.std(unbiased=False)) if 'sel_probs' in dir() else float(pats_probs.std(unbiased=False))
+                        batch_n = max(1, int(pats_indices.numel()))
+                        all_labels = F1_pseudo_label_t.detach().long()
+                        counts = torch.bincount(all_labels, minlength=num_classes).float()
+                        probs = counts / counts.sum().clamp_min(1.0)
+                        gini_all = float(1.0 - (probs ** 2).sum())
+                        sel_counts = torch.bincount(pats_labels.long(), minlength=num_classes).float()
+                        sel_probs_dist = sel_counts / sel_counts.sum().clamp_min(1.0)
+                        gini_sel = float(1.0 - (sel_probs_dist ** 2).sum())
+                        print(f"[diag] ep={ep} sel_all={batch_n} confident={sel_n} "
+                              f"conf={sel_mean:.4f}+-{sel_std:.4f} "
+                              f"gini_all={gini_all:.4f} gini_sel={gini_sel:.4f}")
             if confident.any():
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
