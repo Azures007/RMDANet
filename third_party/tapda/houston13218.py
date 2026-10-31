@@ -793,10 +793,10 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     teacher_prob_aux, output_t1, teacher_proj_t, student_proj_t)
             if args.style_pair_weight > 0:
                 all_loss = all_loss + args.style_pair_weight * style_pair_loss(
-                    teacher_feat_s, teacher_feat_t)
+                    student_proj_s, student_proj_t)
             if args.source_metric_weight > 0:
                 all_loss = all_loss + args.source_metric_weight * source_metric_loss(
-                    teacher_feat_s, target1, num_classes)
+                    student_proj_s, target1, num_classes)
             if args.cnt_shift_weight > 0:
                 all_loss = all_loss + args.cnt_shift_weight * classwise_cnt_shift_loss(
                     source_prototype_state['prototypes'], source_prototype_state['seen'],
@@ -804,7 +804,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     num_classes)
             if args.reliab_lmmd_weight > 0:
                 all_loss = all_loss + args.reliab_lmmd_weight * weighted_lmmd_loss(
-                    teacher_feat_s, target1, teacher_feat_t,
+                    student_proj_s, target1, student_proj_t,
                     F1_pseudo_label_t.detach(), None, num_classes)
             if args.spec_view_js_weight > 0:
                 view = data2 + args.spec_view_strength * torch.randn_like(data2) * data2.std()
