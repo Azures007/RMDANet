@@ -572,6 +572,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     agreement = (output_t1[pats_indices].argmax(dim=1)
                                  == output_t2[pats_indices].argmax(dim=1))
                     confident = confident & agreement
+            if reliab_ce_weight > 0 and ep % 10 == 0:
+                print(f"[ours] ep={ep} pats_selected={int(pats_indices.numel())} "
+                      f"confident={int(confident.sum())} mean_prob={float(pats_probs.mean()):.3f}")
             if confident.any():
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
