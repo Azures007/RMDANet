@@ -324,6 +324,10 @@ def build_parser():
                             help='last epoch in which the maturity gate is active (0 = until the end)')
     ours_group.add_argument('--m1_consensus', action='store_true', default=False,
                             help='use the F1/F2/teacher three-head consensus for M1 labels and confidence')
+    ours_group.add_argument('--m1_prior_correct', action='store_true', default=False,
+                            help='reweight teacher probabilities by the estimated target/source prior ratio (D2)')
+    ours_group.add_argument('--m1_prior_power', default=0.5, type=float,
+                            help='exponent applied to the prior ratio in D2')
     return parser
 
 
@@ -749,6 +753,23 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 else:
                     pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
                     pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
+                if args.m1_prior_correct:
+                    with torch.no_grad():
+                        source_counts = torch.bincount(
+                            target1.detach().long(), minlength=num_classes
+                        ).float()
+                        source_prior = (source_counts / source_counts.sum().clamp_min(1.0)).clamp_min(1e-3)
+                        target_counts = torch.bincount(
+                            F1_pseudo_label_t.detach().long(), minlength=num_classes
+                        ).float()
+                        target_prior = (target_counts / target_counts.sum().clamp_min(1.0)).clamp_min(1e-3)
+                        prior_ratio = (target_prior / source_prior).pow(args.m1_prior_power)
+                        teacher_logits_pc, _ = F1_teacher.f(teacher_feat_t)
+                        prob_pc = torch.softmax(teacher_logits_pc.detach().float(), dim=1)
+                        prob_pc = prob_pc * prior_ratio.unsqueeze(0)
+                        prob_pc = prob_pc / prob_pc.sum(dim=1, keepdim=True).clamp_min(1e-8)
+                        prob_pc = prob_pc[pats_indices]
+                        pats_probs, pats_labels = prob_pc.max(dim=1)
                 if args.m1_consensus:
                     with torch.no_grad():
                         teacher_logits_cs, _ = F1_teacher.f(teacher_feat_t)
