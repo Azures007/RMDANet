@@ -71,7 +71,7 @@ class SSSEAdapter(nn.Module):
         attention_map = torch.zeros(
             (batch, 1, x.size(-2), x.size(-1)), device=device, dtype=features.dtype
         )
-        spectral_reliability = torch.ones((batch, 1), device=device, dtype=features.dtype)
+        spectral_reliability = torch.ones((batch,), device=device, dtype=features.dtype)
         logits2 = self.classifier2(features) if self.classifier2 is not None else None
         return ModelOutput(
             logits=logits,
