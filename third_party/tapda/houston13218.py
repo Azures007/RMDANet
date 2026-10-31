@@ -297,6 +297,14 @@ def build_parser():
                             help='noise strength of the independent spectral view')
     ours_group.add_argument('--reliab_lmmd_weight', default=0.0, type=float,
                             help='v3.0 reliability-weighted LMMD weight (0 disables)')
+    ours_group.add_argument('--m1_maturity_gate', action='store_true', default=False,
+                            help='scale the M1 CE weight by pseudo-label maturity (v3.0 maturity gate)')
+    ours_group.add_argument('--m1_maturity_low', default=0.85, type=float,
+                            help='mean confidence below which the maturity gate is 0')
+    ours_group.add_argument('--m1_maturity_high', default=0.97, type=float,
+                            help='mean confidence above which the maturity gate is 1')
+    ours_group.add_argument('--m1_class_cap', default=0, type=int,
+                            help='per-class cap of the M1 selected samples (0 disables, v3.0 SafetyFeedback)')
     return parser
 
 
@@ -725,6 +733,20 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if args.m1_class_cap > 0 and sel_idx.numel() > 0:
+                    keep = torch.zeros_like(sel_labels, dtype=torch.bool)
+                    for class_id in sel_labels.unique().tolist():
+                        class_mask = sel_labels.eq(int(class_id)).nonzero(as_tuple=True)[0]
+                        if class_mask.numel() > args.m1_class_cap:
+                            order = sel_probs[class_mask].argsort(descending=True)
+                            class_mask = class_mask[order[:args.m1_class_cap]]
+                        keep[class_mask] = True
+                    sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
+                if args.m1_maturity_gate and sel_weight.numel() > 0:
+                    maturity = float(sel_probs.mean().item())
+                    span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
+                    gate = min(max((maturity - args.m1_maturity_low) / span, 0.0), 1.0)
+                    reliab_ce_weight = reliab_ce_weight * gate
                 if args.reliab_ce_balance != 'none':
                     class_counts = torch.bincount(sel_labels, minlength=num_classes).float()
                     class_freq = class_counts[sel_labels].clamp_min(1.0)
