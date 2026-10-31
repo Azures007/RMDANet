@@ -21,6 +21,14 @@ from modules.reliability_encoder import ReliabilityEncoderContrastive
 from modules.cosine_head import CosineClassifierHead
 from modules.prat_full import PhaseReliabilityResidualAmplitudeTransfer
 from modules.memory_full import ReliabilityPrototypeMemory
+from modules.v30_losses import (
+    classwise_cnt_shift_loss,
+    confidence_consistency_loss,
+    source_metric_loss,
+    spectral_view_js_loss,
+    style_pair_loss,
+    weighted_lmmd_loss,
+)
 from loss.contrastive_loss import SupConLoss
 from util.dcl_experiment_utils import (
     TeeLogger,
@@ -275,6 +283,20 @@ def build_parser():
                             help='probability memory momentum')
     ours_group.add_argument('--memory_feature_momentum', default=0.94, type=float,
                             help='feature memory momentum')
+    ours_group.add_argument('--teacher_consistency_weight', default=0.0, type=float,
+                            help='v3.0 weak-strong teacher consistency weight (0 disables)')
+    ours_group.add_argument('--style_pair_weight', default=0.0, type=float,
+                            help='v3.0 source-target style-pair loss weight (0 disables)')
+    ours_group.add_argument('--source_metric_weight', default=0.0, type=float,
+                            help='v3.0 source metric loss weight (0 disables)')
+    ours_group.add_argument('--cnt_shift_weight', default=0.0, type=float,
+                            help='v3.0 class-wise CNT mean-shift weight (0 disables)')
+    ours_group.add_argument('--spec_view_js_weight', default=0.0, type=float,
+                            help='v3.0 independent spectral view JS weight (0 disables)')
+    ours_group.add_argument('--spec_view_strength', default=0.05, type=float,
+                            help='noise strength of the independent spectral view')
+    ours_group.add_argument('--reliab_lmmd_weight', default=0.0, type=float,
+                            help='v3.0 reliability-weighted LMMD weight (0 disables)')
     return parser
 
 
@@ -759,6 +781,39 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     temperature=args.cca_temperature, margin=args.cca_margin,
                 )
                 all_loss = all_loss + cca_weight * cca_value
+
+        # ---- v3.0 component screening (all additive) ----
+        if (args.teacher_consistency_weight > 0 or args.style_pair_weight > 0
+                or args.source_metric_weight > 0 or args.cnt_shift_weight > 0
+                or args.spec_view_js_weight > 0 or args.reliab_lmmd_weight > 0):
+            teacher_logits_aux, _ = F1_teacher.f(teacher_feat_t)
+            teacher_prob_aux = torch.softmax(teacher_logits_aux.detach().float(), dim=1)
+            if args.teacher_consistency_weight > 0:
+                all_loss = all_loss + args.teacher_consistency_weight * confidence_consistency_loss(
+                    teacher_prob_aux, output_t1, teacher_proj_t, student_proj_t)
+            if args.style_pair_weight > 0:
+                all_loss = all_loss + args.style_pair_weight * style_pair_loss(
+                    teacher_feat_s, teacher_feat_t)
+            if args.source_metric_weight > 0:
+                all_loss = all_loss + args.source_metric_weight * source_metric_loss(
+                    teacher_feat_s, target1, num_classes)
+            if args.cnt_shift_weight > 0:
+                all_loss = all_loss + args.cnt_shift_weight * classwise_cnt_shift_loss(
+                    source_prototype_state['prototypes'], source_prototype_state['seen'],
+                    student_feat_t, F1_pseudo_label_t.detach(), F1_pseudo_prob_t.detach(),
+                    num_classes)
+            if args.reliab_lmmd_weight > 0:
+                all_loss = all_loss + args.reliab_lmmd_weight * weighted_lmmd_loss(
+                    teacher_feat_s, target1, teacher_feat_t,
+                    F1_pseudo_label_t.detach(), None, num_classes)
+            if args.spec_view_js_weight > 0:
+                view = data2 + args.spec_view_strength * torch.randn_like(data2) * data2.std()
+                view_feat, _ = G(view)
+                view_logits = F1(view_feat)[0]
+                base_prob = torch.softmax(output_t1.detach().float(), dim=1)
+                view_prob = torch.softmax(view_logits.float(), dim=1)
+                all_loss = all_loss + args.spec_view_js_weight * spectral_view_js_loss(
+                    base_prob, view_prob)
 
         if args.log_results:
             wandb.log({f'{seed}_A_loss': all_loss})
