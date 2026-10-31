@@ -27,6 +27,8 @@ run M2C_class_adaptive    python -u up2pc.py --gpu 0 --num_seeds 2 --reliab_ce_w
 run M2T_trim              python -u up2pc.py --gpu 0 --num_seeds 2 --reliab_ce_weight 0.05 --m1_trim_ratio 0.2
 run M2B_class_quota4      python -u up2pc.py --gpu 0 --num_seeds 2 --reliab_ce_weight 0.05 --m1_class_quota 4
 run M2B_class_quota8      python -u up2pc.py --gpu 0 --num_seeds 2 --reliab_ce_weight 0.05 --m1_class_quota 8
+run M3T_teacher_temp      python -u up2pc.py --gpu 0 --num_seeds 2 --reliab_ce_weight 0.05 --m1_teacher_temperature 2.0
+run M3M_margin_gate       python -u up2pc.py --gpu 0 --num_seeds 2 --reliab_ce_weight 0.05 --m1_margin_gate 0.02
 
 # --- Pavia M1 hyperparameter sweep ---
 for pair in "0.08 0.95" "0.10 0.95" "0.05 0.97" "0.05 0.93"; do
