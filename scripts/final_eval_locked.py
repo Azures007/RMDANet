@@ -8,7 +8,7 @@ import torch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'core'))
 from data import load_source_scene,load_target_image_only,align_target_bands
-from trainer import (DualReliabilityEncoder,build_parser,build_target_evaluation_loader,
+from trainer import (_make_backbone,DualReliabilityEncoder,build_parser,build_target_evaluation_loader,
                      evaluate_target,set_seed)
 
 def main():
@@ -48,13 +48,14 @@ def main():
         if target.amplitude is None:
             raise RuntimeError('amplitude_input requires a target amplitude map')
         aligned=np.concatenate([aligned,target.amplitude[...,None]],axis=-1)
-    model=DualReliabilityEncoder(bands=aligned.shape[-1],num_classes=t.num_classes,
+    model=_make_backbone(bands=aligned.shape[-1],num_classes=t.num_classes,
        projection_dim=t.projection_dim,projection_norm=t.projection_norm,
        aspp_mode=t.aspp_mode,pooling_mode=t.pooling_mode,
        spectral_fusion_mode=t.spectral_fusion_mode,amplitude_channel=t.amplitude_channel,
        amplitude_input=amplitude_input,
        backbone=str(getattr(t,'backbone','ours')),
-       enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0)).to(device)
+       enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0),
+       patch_size=t.patch_size).to(device)
     model.load_state_dict(checkpoint['model'],strict=True);model.eval()
     print('[FINAL EVAL] Loading TARGET GT NOW for reporting ONLY')
     loader=build_target_evaluation_loader(t,aligned)
