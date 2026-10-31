@@ -66,3 +66,16 @@ $\tau\in\{0.90,0.93,0.95,0.97\}$、$\lambda_{\max}\in\{0.03,0.05,0.10\}$、patch
 
 ## Reproducibility
 `scripts/run_5seeds.sh`、`scripts/run_baselines_msda.sh`、`scripts/collect_results.py`、`scripts/significance_test.py`、`scripts/profile_efficiency.py`；协议与 seed 清单见 `docs/PAPER_RESULTS.md`。
+
+## Draft: Introduction (English)
+
+Unsupervised domain adaptation (UDA) for hyperspectral image (HSI) classification aims to transfer a model trained on a labelled source scene to an unlabelled target scene acquired by a different sensor, season, or region. Recent contrastive-distillation frameworks have pushed this setting close to supervised accuracy by combining an EMA teacher, dual-classifier adversarial alignment, batch nuclear-norm maximization, and target contrastive distillation over a selected subset of pseudo-labelled target samples. In these frameworks, however, the selected subset is used *only* as positive/negative pairs for contrastive objectives. The classification loss itself never sees the selected target samples, so the very signal that the selection procedure deemed reliable is not directly optimised.
+
+We start from this observation. Our analysis in Section 3.5 shows that top-k target selection induces a class-conditional selection bias: classes with larger target priors contribute more selected samples, and the selected samples are systematically easier than the class-conditional pseudo-label distribution. Purely contrastive use of these samples therefore reinforces the teacher's existing decision boundary instead of correcting it. We propose a lightweight reliability-gated supervision (RGS) that adds a probability-weighted cross-entropy term on the intersection of the selected set and a high-confidence gate, linearly ramped over training. RGS introduces no new parameters, adds one forward pass of the existing classifiers, and is orthogonal to the contrastive objective.
+
+A second issue appears when the target prior is heavily long-tailed (e.g., the YRD NC12->NC13 task). A global confidence gate then suppresses rare classes, whose pseudo-labels are exactly the ones that need supervision. We therefore introduce [[mechanism-2 name]] that [[adapts the gate per class / distils the full teacher distribution / trims noisy losses]], which improves [[dataset]] by [[x.xx]] on top of RGS.
+
+Beyond the two mechanisms, we report a systematic same-protocol, same-seed study of eleven generic DA components (cosine classifiers, AdamW recipes, LMMD, CCA, CORAL, full PRAT, reliability memory, backbone substitution, teacher consistency, spectral-view consistency, class-wise CNT). Ten of them degrade accuracy on the contrastive-distillation base, which we summarise as a transferability analysis. This negative result is practically useful: it indicates that on strong contrastive UDA bases, generic distribution-alignment modules should not be added without per-task validation.
+
+Experiments on three cross-scene tasks (Pavia, Houston, YRD) under a fixed 180-labels-per-class budget, five seeds, and identical evaluation protocols show that RGS improves Pavia by [[+3.80]] and Houston by [[+1.23]] over the reproduced baseline, while the reproduced baseline itself already exceeds the published TAPDA numbers on YRD (95.09 vs 94.34).
+
