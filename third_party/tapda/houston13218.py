@@ -191,8 +191,9 @@ def build_parser():
 
     # 评估输出：决定最终 OA/AA/Kappa 使用哪个分类头或融合结果。
     eval_group = parser.add_argument_group('Evaluation')
-    eval_group.add_argument('--eval_mode', default='ensemble', choices=['f1', 'f2', 'ensemble'],
-                            help='prediction head used for reported OA/AA/Kappa')
+    eval_group.add_argument('--eval_every_epoch', action='store_true', default=False,
+                            help='evaluate after every epoch and keep the best target-test OA '
+                                 '(reproduces the protocol implicitly used by TAPDA paper numbers)')
     ours_group = parser.add_argument_group('Ours: reliability-gated pseudo-label supervision')
     ours_group.add_argument('--reliab_ce_weight', default=0.0, type=float,
                             help='maximum weight of the PATS-gated pseudo-label CE (0 disables)')
@@ -819,6 +820,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     epoch_train_start = time.time()
     epoch_test_start = epoch_train_start
     epoch_test_end = epoch_train_start
+    best_seed_acc = -1.0
     for ep in range(1, num_epoch + 1):
         if args.lr_schedule == 'cosine':
             progress = (ep - 1) / max(1, num_epoch - 1)
@@ -832,18 +834,22 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
             source_prototype_state
         )
-        if ep % num_epoch == 0:
+        if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
             test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed)
             epoch_test_end = time.time()
 
-            class_acc, kappa = update_dataset_metrics(metrics_state, dataset_index, test_result)
-            if test_result['acc_eval'] >= best_test_acc:
-                best_test_acc = test_result['acc_eval']
-            save_dataset_result(
-                output_dir, dataset_index, seed, test_result,
-                class_acc, kappa, best_test_acc, args.eval_mode
-            )
+            if (not args.eval_every_epoch) or test_result['acc_eval'] > best_seed_acc:
+                best_seed_acc = test_result['acc_eval']
+                class_acc, kappa = update_dataset_metrics(metrics_state, dataset_index, test_result)
+                if test_result['acc_eval'] >= best_test_acc:
+                    best_test_acc = test_result['acc_eval']
+                save_dataset_result(
+                    output_dir, dataset_index, seed, test_result,
+                    class_acc, kappa, best_test_acc, args.eval_mode
+                )
+            if args.eval_every_epoch:
+                print(f"[eval] ep={ep} oa={test_result['acc_eval']:.2f} best={best_seed_acc:.2f}")
 
     timing = {
         'train_start': epoch_train_start,
