@@ -20,6 +20,7 @@ from loss.contrastive_loss import SupConLoss
 from modules.HybridSN import SSSE_Contrastive
 from modules.reliability_encoder import ReliabilityEncoderContrastive
 from modules.cosine_head import CosineClassifierHead
+from modules.prat_full import PhaseReliabilityResidualAmplitudeTransfer
 from modules.basenet import *
 from modules.teacher_cl import EMATeacher
 from util.dcl_experiment_utils import (
@@ -241,6 +242,15 @@ def build_parser():
                             help='soft-assignment temperature of the CCA alignment')
     ours_group.add_argument('--cca_margin', default=0.3, type=float,
                             help='margin of the CCA softplus objective')
+    ours_group.add_argument('--prat_full_mode', default='off',
+                            choices=['off', 'fixed', 'phase', 'phase_energy', 'full', 'replace'],
+                            help='v3.0 full PRAT mode applied to source samples (off disables)')
+    ours_group.add_argument('--prat_full_strength', default=0.3, type=float,
+                            help='transfer strength of the full PRAT augmentation')
+    ours_group.add_argument('--prat_full_start_epoch', default=1, type=int,
+                            help='epoch to start the full PRAT augmentation')
+    ours_group.add_argument('--prat_full_ema', default=0.96, type=float,
+                            help='EMA momentum of the target amplitude reference in full PRAT')
     return parser
 
 
@@ -500,7 +510,7 @@ def initialize_models_and_optimizers(n_bands, patch_size, num_classes, device, a
 def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 contrastive_loss_func, optimizer_g, optimizer_f,
                 batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-                source_prototype_state):
+                source_prototype_state, prat_full=None):
     iter_source, iter_target = iter(train_loader), iter(train_tar_loader)
     criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing).to(DEV)
     G.train()
@@ -528,6 +538,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
         if args.prat_prob > 0 and ep >= args.prat_start_epoch:
             data2 = prat_augment(data1, data2, args.prat_strength, args.prat_prob)
+
+        if prat_full is not None and ep >= args.prat_full_start_epoch:
+            data1, _ = prat_full(data1, data2, args.prat_full_strength)
 
         eta = 1.0
         src_batch_size = data1.size(0)
@@ -888,6 +901,14 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
+    prat_full = None
+    if getattr(args, 'prat_full_mode', 'off') != 'off':
+        prat_full = PhaseReliabilityResidualAmplitudeTransfer(
+            bands=experiment_config['n_bands'],
+            patch_size=patch_size,
+            ema_momentum=args.prat_full_ema,
+            mode=args.prat_full_mode,
+        ).to(DEV)
 
     epoch_train_start = time.time()
     epoch_test_start = epoch_train_start
@@ -904,7 +925,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             contrastive_loss_func, optimizer_g, optimizer_f,
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-            source_prototype_state,
+            source_prototype_state, prat_full,
         )
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
