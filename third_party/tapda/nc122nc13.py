@@ -195,6 +195,16 @@ def build_parser():
                             help='per-class selection quota scaled by inverse target prior (0 disables)')
     ours_group.add_argument('--m1_scope', default='pats', choices=['pats', 'all'],
                             help='supervision scope: only PATS-selected samples, or all confident targets')
+    ours_group.add_argument('--m1_gate_mode', default='fixed', choices=['fixed', 'quantile'],
+                            help='maturity gate: v1.0 fixed thresholds or data-adaptive quantile')
+    ours_group.add_argument('--m1_gate_k', default=2.0, type=float,
+                            help='standard-deviation multiplier of the adaptive maturity gate')
+    ours_group.add_argument('--m1_topk_ratio', default=0.0, type=float,
+                            help='coverage-driven selection: keep the top ratio of PATS samples (0 disables)')
+    ours_group.add_argument('--m1_quota_mode', default='none', choices=['none', 'inverse_prior'],
+                            help='class quota mode: fixed cap (legacy) or inverse-prior quota')
+    ours_group.add_argument('--m1_quota_base', default=4, type=int,
+                            help='base quota of the inverse-prior class quota')
     return parser
 
 
@@ -560,6 +570,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
                 pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
                 confident = pats_probs >= args.reliab_ce_min_prob
+                if args.m1_topk_ratio > 0 and pats_probs.numel() > 0:
+                    topk = max(1, int(round(args.m1_topk_ratio * pats_probs.numel())))
+                    confident = pats_probs >= pats_probs.topk(topk).values.min()
             if confident.any():
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
@@ -574,7 +587,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                             class_mask = class_mask[order[:args.m1_class_cap]]
                         keep[class_mask] = True
                     sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
-                if args.m1_class_quota > 0 and sel_labels.numel() > 0:
+                if (args.m1_quota_mode == 'inverse_prior' or args.m1_class_quota > 0) and sel_labels.numel() > 0:
+                    quota_base = args.m1_quota_base if args.m1_quota_mode == 'inverse_prior' else args.m1_class_quota
                     target_counts = torch.bincount(
                         F1_pseudo_label_t.detach().long(), minlength=num_classes
                     ).float().clamp_min(1.0)
@@ -582,14 +596,20 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     keep = torch.zeros_like(sel_labels, dtype=torch.bool)
                     for class_id in sel_labels.unique().tolist():
                         class_mask = sel_labels.eq(int(class_id)).nonzero(as_tuple=True)[0]
-                        quota = int(max(1, round(args.m1_class_quota * float(inverse_prior[int(class_id)]))))
+                        quota = int(max(1, round(quota_base * float(inverse_prior[int(class_id)]))))
                         order = sel_probs[class_mask].argsort(descending=True)
                         keep[class_mask[order[:quota]]] = True
                     sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
                 if args.m1_maturity_gate and sel_weight.numel() > 0:
                     maturity = float(sel_probs.mean().item())
-                    span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
-                    gate = min(max((maturity - args.m1_maturity_low) / span, 0.0), 1.0)
+                    if args.m1_gate_mode == 'fixed':
+                        span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
+                        gate = min(max((maturity - args.m1_maturity_low) / span, 0.0), 1.0)
+                    else:
+                        ref_mean = float(sel_probs.mean().item())
+                        ref_std = float(sel_probs.std(unbiased=False).clamp_min(1e-6).item())
+                        width = args.m1_gate_k * ref_std
+                        gate = min(max((maturity - (ref_mean - width)) / max(width, 1e-6), 0.0), 1.0)
                     reliab_ce_weight = reliab_ce_weight * gate
                 ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
                 rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
