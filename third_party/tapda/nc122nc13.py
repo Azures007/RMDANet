@@ -608,7 +608,31 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         ) / 3.0
                         prob_cons = prob_cons[pats_indices]
                         pats_probs, pats_labels = prob_cons.max(dim=1)
-                confident = pats_probs >= args.reliab_ce_min_prob
+                if args.m1_teacher_temperature > 0:
+                    teacher_logits_tp, _ = F1_teacher.f(teacher_feat_t)
+                    teacher_prob_tp = torch.softmax(
+                        teacher_logits_tp.detach().float() / args.m1_teacher_temperature, dim=1
+                    )[pats_indices]
+                    pats_probs, pats_labels = teacher_prob_tp.max(dim=1)
+                if args.m1_class_adaptive > 0 and pats_labels.numel() > 0:
+                    prior_counts = torch.bincount(
+                        F1_pseudo_label_t.detach().long(), minlength=num_classes
+                    ).float()
+                    priors = prior_counts / prior_counts.sum().clamp_min(1.0)
+                    max_prior = priors.max().clamp_min(1e-6)
+                    adaptive_thr = args.reliab_ce_min_prob - args.m1_class_adaptive * (
+                        1.0 - priors[pats_labels] / max_prior
+                    )
+                    confident = pats_probs >= adaptive_thr
+                else:
+                    confident = pats_probs >= args.reliab_ce_min_prob
+                if args.m1_margin_gate > 0:
+                    teacher_logits_mg, _ = F1_teacher.f(teacher_feat_t)
+                    teacher_prob_mg = torch.softmax(
+                        teacher_logits_mg.detach().float(), dim=1
+                    )[pats_indices]
+                    top2 = teacher_prob_mg.topk(2, dim=1).values
+                    confident = confident & ((top2[:, 0] - top2[:, 1]) >= args.m1_margin_gate)
                 if args.m1_topk_ratio > 0 and pats_probs.numel() > 0:
                     topk = max(1, int(round(args.m1_topk_ratio * pats_probs.numel())))
                     confident = pats_probs >= pats_probs.topk(topk).values.min()
