@@ -777,37 +777,53 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 all_loss = all_loss + cca_weight * cca_value
 
         # ---- v3.0 component screening (all additive) ----
+        screen_values = {}
         if (args.teacher_consistency_weight > 0 or args.style_pair_weight > 0
                 or args.source_metric_weight > 0 or args.cnt_shift_weight > 0
                 or args.spec_view_js_weight > 0 or args.reliab_lmmd_weight > 0):
             teacher_logits_aux, _ = F1_teacher.f(teacher_feat_t)
             teacher_prob_aux = torch.softmax(teacher_logits_aux.detach().float(), dim=1)
             if args.teacher_consistency_weight > 0:
-                all_loss = all_loss + args.teacher_consistency_weight * confidence_consistency_loss(
+                value = confidence_consistency_loss(
                     teacher_prob_aux, output_t1, teacher_proj_t, student_proj_t)
+                screen_values['S1_teacher_consistency'] = value
+                all_loss = all_loss + args.teacher_consistency_weight * value
             if args.style_pair_weight > 0:
-                all_loss = all_loss + args.style_pair_weight * style_pair_loss(
-                    student_proj_s, student_proj_t)
+                value = style_pair_loss(student_proj_s, student_proj_t)
+                screen_values['S2_style_pair'] = value
+                all_loss = all_loss + args.style_pair_weight * value
             if args.source_metric_weight > 0:
-                all_loss = all_loss + args.source_metric_weight * source_metric_loss(
-                    student_proj_s, target1, num_classes)
+                value = source_metric_loss(student_proj_s, target1, num_classes)
+                screen_values['S3_source_metric'] = value
+                all_loss = all_loss + args.source_metric_weight * value
             if args.cnt_shift_weight > 0:
-                all_loss = all_loss + args.cnt_shift_weight * classwise_cnt_shift_loss(
+                value = classwise_cnt_shift_loss(
                     source_prototype_state['prototypes'], source_prototype_state['seen'],
-                    student_feat_t, F1_pseudo_label_t.detach(), F1_pseudo_prob_t.detach(),
+                    student_proj_t, F1_pseudo_label_t.detach(), F1_pseudo_prob_t.detach(),
                     num_classes)
+                screen_values['S4_cnt_shift'] = value
+                all_loss = all_loss + args.cnt_shift_weight * value
             if args.reliab_lmmd_weight > 0:
-                all_loss = all_loss + args.reliab_lmmd_weight * weighted_lmmd_loss(
+                value = weighted_lmmd_loss(
                     student_proj_s, target1, student_proj_t,
                     F1_pseudo_label_t.detach(), None, num_classes)
+                screen_values['S6_reliab_lmmd'] = value
+                all_loss = all_loss + args.reliab_lmmd_weight * value
             if args.spec_view_js_weight > 0:
                 view = data2 + args.spec_view_strength * torch.randn_like(data2) * data2.std()
                 view_feat, _ = G(view)
                 view_logits = F1(view_feat)[0]
                 base_prob = torch.softmax(output_t1.detach().float(), dim=1)
                 view_prob = torch.softmax(view_logits.float(), dim=1)
-                all_loss = all_loss + args.spec_view_js_weight * spectral_view_js_loss(
-                    base_prob, view_prob)
+                value = spectral_view_js_loss(base_prob, view_prob)
+                screen_values['S5_spec_view_js'] = value
+                all_loss = all_loss + args.spec_view_js_weight * value
+            if screen_values and (ep <= 1 and batch_idx <= 3):
+                report = ' '.join(
+                    f'{key}={float(val.detach()):.4f}(grad={int(val.requires_grad)})'
+                    for key, val in screen_values.items()
+                )
+                print(f'[screen] ep={ep} iter={batch_idx} {report}')
 
         if args.log_results:
             wandb.log({f'{seed}_A_loss': all_loss})
