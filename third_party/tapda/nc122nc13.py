@@ -193,6 +193,8 @@ def build_parser():
                             help='per-class cap of the M1 selected samples (0 disables)')
     ours_group.add_argument('--m1_class_quota', default=0, type=int,
                             help='per-class selection quota scaled by inverse target prior (0 disables)')
+    ours_group.add_argument('--m1_scope', default='pats', choices=['pats', 'all'],
+                            help='supervision scope: only PATS-selected samples, or all confident targets')
     return parser
 
 
@@ -551,6 +553,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             ep, args.reliab_ce_start_epoch, args.reliab_ce_ramp_epochs, args.reliab_ce_weight
         )
         pats_indices = target_contrastive_stats.get('selected_indices')
+        if args.m1_scope == 'all':
+            pats_indices = torch.arange(F1_pseudo_label_t.numel(), device=F1_pseudo_label_t.device)
         if reliab_ce_weight > 0 and pats_indices is not None and pats_indices.numel() > 0:
             with torch.no_grad():
                 pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
