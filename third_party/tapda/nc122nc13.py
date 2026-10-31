@@ -205,6 +205,10 @@ def build_parser():
                             help='class quota mode: fixed cap (legacy) or inverse-prior quota')
     ours_group.add_argument('--m1_quota_base', default=4, type=int,
                             help='base quota of the inverse-prior class quota')
+    ours_group.add_argument('--m1_gate_epoch_start', default=0, type=int,
+                            help='first epoch in which the maturity gate is active (0 = from the beginning)')
+    ours_group.add_argument('--m1_gate_epoch_end', default=0, type=int,
+                            help='last epoch in which the maturity gate is active (0 = until the end)')
     return parser
 
 
@@ -600,7 +604,12 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         order = sel_probs[class_mask].argsort(descending=True)
                         keep[class_mask[order[:quota]]] = True
                     sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
-                if args.m1_maturity_gate and sel_weight.numel() > 0:
+                gate_active = True
+                if args.m1_gate_epoch_start > 0 or args.m1_gate_epoch_end > 0:
+                    gate_end = args.m1_gate_epoch_end if args.m1_gate_epoch_end > 0 else 10 ** 9
+                    gate_start = args.m1_gate_epoch_start if args.m1_gate_epoch_start > 0 else 1
+                    gate_active = gate_start <= ep <= gate_end
+                if args.m1_maturity_gate and gate_active and sel_weight.numel() > 0:
                     maturity = float(sel_probs.mean().item())
                     if args.m1_gate_mode == 'fixed':
                         span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
