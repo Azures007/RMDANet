@@ -313,6 +313,10 @@ def build_parser():
                             help='lower the M1 threshold for rare pseudo-label classes (M2-C class-adaptive gate)')
     ours_group.add_argument('--m1_class_quota', default=0, type=int,
                             help='per-class selection quota scaled by inverse target prior (M2-B, 0 disables)')
+    ours_group.add_argument('--m1_teacher_temperature', default=0.0, type=float,
+                            help='temperature used to recalibrate teacher confidence before gating (M3-T, 0 disables)')
+    ours_group.add_argument('--m1_margin_gate', default=0.0, type=float,
+                            help='minimum teacher top1-top2 margin for a sample to enter M1 (M3-M, 0 disables)')
     return parser
 
 
@@ -726,8 +730,15 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if ((reliab_ce_weight > 0 or proto_anchor_weight > 0)
                 and pats_indices is not None and pats_indices.numel() > 0):
             with torch.no_grad():
-                pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
-                pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
+                if args.m1_teacher_temperature > 0:
+                    teacher_logits_m3, _ = F1_teacher.f(teacher_feat_t)
+                    teacher_prob_m3 = torch.softmax(
+                        teacher_logits_m3.detach().float() / args.m1_teacher_temperature, dim=1
+                    )[pats_indices]
+                    pats_probs, pats_labels = teacher_prob_m3.max(dim=1)
+                else:
+                    pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
+                    pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
                 if args.m1_class_adaptive > 0 and pats_labels.numel() > 0:
                     prior_counts = torch.bincount(
                         F1_pseudo_label_t.detach().long(), minlength=num_classes
@@ -740,6 +751,14 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     confident = pats_probs >= adaptive_thr
                 else:
                     confident = pats_probs >= args.reliab_ce_min_prob
+                if args.m1_margin_gate > 0:
+                    with torch.no_grad():
+                        teacher_logits_m3m, _ = F1_teacher.f(teacher_feat_t)
+                        teacher_prob_m3m = torch.softmax(
+                            teacher_logits_m3m.detach().float(), dim=1
+                        )[pats_indices]
+                        top2 = teacher_prob_m3m.topk(2, dim=1).values
+                        confident = confident & ((top2[:, 0] - top2[:, 1]) >= args.m1_margin_gate)
                 if args.reliab_ce_agreement:
                     agreement = (output_t1[pats_indices].argmax(dim=1)
                                  == output_t2[pats_indices].argmax(dim=1))
