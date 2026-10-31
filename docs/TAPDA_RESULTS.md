@@ -1,18 +1,20 @@
 # TAPDA 复现与我们的可靠性伪标签监督（实验结果记录）
 
-协议：**最后一轮评估**（已把 TAPDA 的 best-epoch 选模改成 `if True`，不使用目标标签选模），
-单 seed（除注明外），`enumerate(SEEDS[:N])` 控制 seed 数。
+协议：**最后一轮评估**。已核对原始 TAPDA 代码：`test_model` 只在
+`if ep % num_epoch == 0`（最后一轮）调用，`best_test_acc` 仅是跨 seed 记录最大值，
+**不存在 best-epoch 选模泄漏**；因此论文的 10 seed 数字与我们的复现口径完全一致。
 
 ## 1. 复现基线（TAPDA 官方代码，本环境复跑）
 
 | 数据集 | 设置 | OA |
 |---|---|---|
-| Pavia | patch 9、102 波段、`SSSE_test` | seed0 85.75；5 seed = 85.75 / 90.97 / 90.09 / 92.26 / 93.40 → **均值 90.49**（注：这批数字来自改 best-epoch 之前的运行，seed0 与改后完全一致，可近似视为最后一轮） |
-| Houston | patch 7、48 波段、`SSSE_Houston` | **80.83**（seed0，最后一轮） |
-| HyRANK | patch 3、176 波段、`SSSE_test`（我们生成的 `dioni2loukia.py`） | **48.31**（seed0，最后一轮；Pavia 超参未按 HyRANK 调） |
+| Pavia | patch 9、102 波段、`SSSE_test` | seed0 85.75；5 seed = 85.75 / 90.97 / 90.09 / 92.26 / 93.40 → **均值 90.49** |
+| Houston | patch 7、48 波段、`SSSE_Houston` | 3 seed 均值 **78.93**（80.83 / 78.96 / 77.01）；2 seed 均值 79.90 |
+| HyRANK | patch 3、176 波段、`SSSE_test`（我们生成的 `dioni2loukia.py`） | **48.31**（seed0；Pavia 超参未按 HyRANK 调） |
 
-TAPDA 论文（10 seed mean±std，best-epoch 选模）：Pavia 93.39±0.37、Houston 80.67±0.93、NC12→NC13 94.34±0.61。
+TAPDA 论文（10 seed mean±std，最后一轮口径）：Pavia 93.39±0.37、Houston 80.67±0.93、NC12→NC13 94.34±0.61。
 **论文没有 HyRANK 任务。**
+**目标：在 Pavia / Houston / YRD 三个数据集上同口径超过 TAPDA。**
 
 ## 2. 我们的模块：可靠性加权伪标签 CE
 
