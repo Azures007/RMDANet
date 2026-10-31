@@ -154,7 +154,7 @@ def build_parser():
                                        help='epochs used to linearly ramp up target contrastive weight')
     target_contrast_group.add_argument('--target_contrast_threshold_start', default=0.75, type=float,
                                        help='initial confidence threshold for target pseudo labels')
-    target_contrast_group.add_argument('--target_contrast_threshold_end', default=0.85, type=float,
+    target_contrast_group.add_argument('--target_contrast_threshold_end', default=0.98, type=float,
                                        help='final confidence threshold for target pseudo labels')
     target_contrast_group.add_argument('--target_contrast_selection', default='class_topk',
                                        choices=['threshold', 'class_topk'],
@@ -292,7 +292,7 @@ def build_parser():
                             help='scale the M1 CE weight by pseudo-label maturity (v3.0 maturity gate)')
     ours_group.add_argument('--m1_maturity_low', default=0.85, type=float,
                             help='mean confidence below which the maturity gate is 0')
-    ours_group.add_argument('--m1_maturity_high', default=0.97, type=float,
+    ours_group.add_argument('--m1_maturity_high', default=0.999, type=float,
                             help='mean confidence above which the maturity gate is 1')
     ours_group.add_argument('--m1_class_cap', default=0, type=int,
                             help='per-class cap of the M1 selected samples (0 disables, v3.0 SafetyFeedback)')

@@ -71,6 +71,10 @@ def classwise_cnt_shift_loss(source_prototypes, source_seen, target_features,
     if int(valid.sum().item()) < 2:
         return target_features.new_tensor(0.0)
     features = F.normalize(target_features.float(), dim=1)
+    proto_dim = int(source_prototypes.size(1))
+    if features.size(1) != proto_dim:
+        # Keep the comparison well-defined across projection/feature spaces.
+        features = F.normalize(features[:, :proto_dim], dim=1)
     total = features.new_tensor(0.0)
     count = 0
     for class_id in range(num_classes):

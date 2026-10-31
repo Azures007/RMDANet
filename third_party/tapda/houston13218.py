@@ -299,9 +299,9 @@ def build_parser():
                             help='v3.0 reliability-weighted LMMD weight (0 disables)')
     ours_group.add_argument('--m1_maturity_gate', action='store_true', default=False,
                             help='scale the M1 CE weight by pseudo-label maturity (v3.0 maturity gate)')
-    ours_group.add_argument('--m1_maturity_low', default=0.85, type=float,
+    ours_group.add_argument('--m1_maturity_low', default=0.98, type=float,
                             help='mean confidence below which the maturity gate is 0')
-    ours_group.add_argument('--m1_maturity_high', default=0.97, type=float,
+    ours_group.add_argument('--m1_maturity_high', default=0.999, type=float,
                             help='mean confidence above which the maturity gate is 1')
     ours_group.add_argument('--m1_class_cap', default=0, type=int,
                             help='per-class cap of the M1 selected samples (0 disables, v3.0 SafetyFeedback)')
