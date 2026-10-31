@@ -311,6 +311,8 @@ def build_parser():
                             help='drop the top fraction of the M1 per-sample losses (M2-T trimmed robust loss)')
     ours_group.add_argument('--m1_class_adaptive', default=0.0, type=float,
                             help='lower the M1 threshold for rare pseudo-label classes (M2-C class-adaptive gate)')
+    ours_group.add_argument('--m1_class_quota', default=0, type=int,
+                            help='per-class selection quota scaled by inverse target prior (M2-B, 0 disables)')
     return parser
 
 
@@ -758,6 +760,18 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                             order = sel_probs[class_mask].argsort(descending=True)
                             class_mask = class_mask[order[:args.m1_class_cap]]
                         keep[class_mask] = True
+                    sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
+                if args.m1_class_quota > 0 and sel_labels.numel() > 0:
+                    target_counts = torch.bincount(
+                        F1_pseudo_label_t.detach().long(), minlength=num_classes
+                    ).float().clamp_min(1.0)
+                    inverse_prior = target_counts.mean() / target_counts
+                    keep = torch.zeros_like(sel_labels, dtype=torch.bool)
+                    for class_id in sel_labels.unique().tolist():
+                        class_mask = sel_labels.eq(int(class_id)).nonzero(as_tuple=True)[0]
+                        quota = int(max(1, round(args.m1_class_quota * float(inverse_prior[int(class_id)]))))
+                        order = sel_probs[class_mask].argsort(descending=True)
+                        keep[class_mask[order[:quota]]] = True
                     sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
                 if args.m1_maturity_gate and sel_weight.numel() > 0:
                     maturity = float(sel_probs.mean().item())
