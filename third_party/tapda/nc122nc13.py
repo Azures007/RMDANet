@@ -183,6 +183,16 @@ def build_parser():
                             help='epoch to start the pseudo-label CE')
     ours_group.add_argument('--reliab_ce_ramp_epochs', default=10, type=int,
                             help='epochs used to linearly ramp up the pseudo-label CE weight')
+    ours_group.add_argument('--m1_maturity_gate', action='store_true', default=False,
+                            help='scale the M1 CE weight by pseudo-label maturity')
+    ours_group.add_argument('--m1_maturity_low', default=0.98, type=float,
+                            help='mean confidence below which the maturity gate is 0')
+    ours_group.add_argument('--m1_maturity_high', default=0.999, type=float,
+                            help='mean confidence above which the maturity gate is 1')
+    ours_group.add_argument('--m1_class_cap', default=0, type=int,
+                            help='per-class cap of the M1 selected samples (0 disables)')
+    ours_group.add_argument('--m1_class_quota', default=0, type=int,
+                            help='per-class selection quota scaled by inverse target prior (0 disables)')
     return parser
 
 
@@ -550,8 +560,35 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
+                sel_weight = sel_probs
+                if args.m1_class_cap > 0 and sel_idx.numel() > 0:
+                    keep = torch.zeros_like(sel_labels, dtype=torch.bool)
+                    for class_id in sel_labels.unique().tolist():
+                        class_mask = sel_labels.eq(int(class_id)).nonzero(as_tuple=True)[0]
+                        if class_mask.numel() > args.m1_class_cap:
+                            order = sel_probs[class_mask].argsort(descending=True)
+                            class_mask = class_mask[order[:args.m1_class_cap]]
+                        keep[class_mask] = True
+                    sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
+                if args.m1_class_quota > 0 and sel_labels.numel() > 0:
+                    target_counts = torch.bincount(
+                        F1_pseudo_label_t.detach().long(), minlength=num_classes
+                    ).float().clamp_min(1.0)
+                    inverse_prior = target_counts.mean() / target_counts
+                    keep = torch.zeros_like(sel_labels, dtype=torch.bool)
+                    for class_id in sel_labels.unique().tolist():
+                        class_mask = sel_labels.eq(int(class_id)).nonzero(as_tuple=True)[0]
+                        quota = int(max(1, round(args.m1_class_quota * float(inverse_prior[int(class_id)]))))
+                        order = sel_probs[class_mask].argsort(descending=True)
+                        keep[class_mask[order[:quota]]] = True
+                    sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
+                if args.m1_maturity_gate and sel_weight.numel() > 0:
+                    maturity = float(sel_probs.mean().item())
+                    span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
+                    gate = min(max((maturity - args.m1_maturity_low) / span, 0.0), 1.0)
+                    reliab_ce_weight = reliab_ce_weight * gate
                 ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
-                rel_ce = (ce_all * sel_probs).sum() / sel_probs.sum().clamp_min(1e-6)
+                rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
                 all_loss = all_loss + reliab_ce_weight * rel_ce
 
         if args.log_results:
