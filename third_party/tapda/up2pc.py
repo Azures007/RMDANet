@@ -185,6 +185,8 @@ def build_parser():
                                  help='print prototype-aware target selection details in training logs')
 
     eval_group = parser.add_argument_group('Evaluation')
+    eval_group.add_argument('--eval_mode', default='ensemble', choices=['f1', 'f2', 'ensemble'],
+                            help='prediction head used for reported OA/AA/Kappa')
     eval_group.add_argument('--eval_every_epoch', action='store_true', default=False,
                             help='evaluate after every epoch and keep the best target-test OA '
                                  '(this reproduces the protocol implicitly used by TAPDA paper numbers)')
