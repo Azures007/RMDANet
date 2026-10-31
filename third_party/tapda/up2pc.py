@@ -221,7 +221,36 @@ def build_parser():
                             help='blend strength of source amplitude in PRAT augmentation')
     ours_group.add_argument('--prat_start_epoch', default=0, type=int,
                             help='epoch to start PRAT augmentation')
+    ours_group.add_argument('--lmmd_weight', default=0.0, type=float,
+                            help='maximum weight of the v3.0 LMMD class-conditional alignment (0 disables)')
+    ours_group.add_argument('--lmmd_start_epoch', default=10, type=int,
+                            help='epoch to start the LMMD alignment')
+    ours_group.add_argument('--lmmd_ramp_epochs', default=10, type=int,
+                            help='epochs used to linearly ramp up the LMMD weight')
+    ours_group.add_argument('--lmmd_min_samples', default=4, type=int,
+                            help='minimum samples per class required to compute LMMD')
     return parser
+
+
+def lmmd_loss(source_features, source_labels, target_features, target_labels,
+              num_classes, min_samples=4):
+    """v3.0 Local MMD: align class-conditional feature distributions."""
+    source = source_features.float()
+    target = target_features.float()
+    total = source.new_tensor(0.0)
+    used = 0
+    for class_idx in range(num_classes):
+        source_mask = source_labels.eq(class_idx)
+        target_mask = target_labels.eq(class_idx)
+        if int(source_mask.sum().item()) < min_samples or int(target_mask.sum().item()) < min_samples:
+            continue
+        source_mean = source[source_mask].mean(dim=0, keepdim=True)
+        target_mean = target[target_mask].mean(dim=0, keepdim=True)
+        total = total + (source_mean - target_mean).pow(2).sum()
+        used += 1
+    if used == 0:
+        return source.new_tensor(0.0)
+    return total / used
 
 
 def coral_loss(source_features, target_features):
@@ -613,6 +642,17 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         )
         if coral_weight > 0:
             all_loss = all_loss + coral_weight * coral_loss(student_proj_s, student_proj_t)
+
+        lmmd_weight = get_rampup_weight(
+            ep, args.lmmd_start_epoch, args.lmmd_ramp_epochs, args.lmmd_weight
+        )
+        if lmmd_weight > 0:
+            lmmd_value = lmmd_loss(
+                output[:src_batch_size], target1.long(),
+                output[src_batch_size:], F1_pseudo_label_t.long(),
+                num_classes, min_samples=args.lmmd_min_samples,
+            )
+            all_loss = all_loss + lmmd_weight * lmmd_value
 
         if args.log_results:
             wandb.log({f'{seed}_A_loss': all_loss})
