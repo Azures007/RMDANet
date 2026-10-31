@@ -240,6 +240,16 @@ def build_parser():
                             help='epochs used to linearly ramp up the LMMD weight')
     ours_group.add_argument('--lmmd_min_samples', default=4, type=int,
                             help='minimum samples per class required to compute LMMD')
+    ours_group.add_argument('--cca_weight', default=0.0, type=float,
+                            help='maximum weight of the v3.0 CCA class-conditional alignment (0 disables)')
+    ours_group.add_argument('--cca_start_epoch', default=10, type=int,
+                            help='epoch to start the CCA alignment')
+    ours_group.add_argument('--cca_ramp_epochs', default=10, type=int,
+                            help='epochs used to linearly ramp up the CCA weight')
+    ours_group.add_argument('--cca_temperature', default=0.1, type=float,
+                            help='soft-assignment temperature of the CCA alignment')
+    ours_group.add_argument('--cca_margin', default=0.3, type=float,
+                            help='margin of the CCA softplus objective')
     return parser
 
 
@@ -262,6 +272,24 @@ def lmmd_loss(source_features, source_labels, target_features, target_labels,
     if used == 0:
         return source.new_tensor(0.0)
     return total / used
+
+
+def cca_alignment_loss(target_features, source_prototypes, source_seen,
+                        num_classes, temperature=0.1, margin=0.3):
+    """v3.0 soft-assignment class-conditional alignment (CCA)."""
+    valid = source_seen > 0
+    if int(valid.sum().item()) < 2:
+        return target_features.new_tensor(0.0)
+    features = F.normalize(target_features.float(), dim=1)
+    protos = F.normalize(source_prototypes.float(), dim=1)[valid]
+    sim = features @ protos.t() / max(float(temperature), 1e-4)
+    soft = F.softmax(sim, dim=1)
+    target_protos = F.normalize(soft.t() @ features, dim=1)
+    positive = (protos * target_protos).sum(dim=1)
+    sim_mat = protos @ target_protos.t()
+    neg_mask = torch.eye(protos.size(0), device=sim_mat.device, dtype=torch.bool)
+    negative = sim_mat.masked_fill(neg_mask, -10.0).max(dim=1).values
+    return F.softplus(negative - positive + float(margin)).mean()
 
 
 def coral_loss(source_features, target_features):
@@ -661,6 +689,19 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 num_classes, min_samples=args.lmmd_min_samples,
             )
             all_loss = all_loss + lmmd_weight * lmmd_value
+
+        cca_weight = get_rampup_weight(
+            ep, args.cca_start_epoch, args.cca_ramp_epochs, args.cca_weight
+        )
+        if cca_weight > 0:
+            proto_bank = source_prototype_state.get('prototypes')
+            proto_seen = source_prototype_state.get('seen')
+            if proto_bank is not None and proto_seen is not None:
+                cca_value = cca_alignment_loss(
+                    student_proj_t, proto_bank, proto_seen, num_classes,
+                    temperature=args.cca_temperature, margin=args.cca_margin,
+                )
+                all_loss = all_loss + cca_weight * cca_value
 
         if args.log_results:
             wandb.log({f'{seed}_A_loss': all_loss})
