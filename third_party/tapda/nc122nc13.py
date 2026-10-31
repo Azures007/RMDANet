@@ -209,6 +209,8 @@ def build_parser():
                             help='first epoch in which the maturity gate is active (0 = from the beginning)')
     ours_group.add_argument('--m1_gate_epoch_end', default=0, type=int,
                             help='last epoch in which the maturity gate is active (0 = until the end)')
+    ours_group.add_argument('--m1_consensus', action='store_true', default=False,
+                            help='use the F1/F2/teacher three-head consensus for M1 labels and confidence')
     return parser
 
 
@@ -573,6 +575,16 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             with torch.no_grad():
                 pats_labels = F1_pseudo_label_t.detach()[pats_indices].long()
                 pats_probs = F1_pseudo_prob_t.detach()[pats_indices].float()
+                if args.m1_consensus:
+                    with torch.no_grad():
+                        teacher_logits_cs, _ = F1_teacher.f(teacher_feat_t)
+                        prob_cons = (
+                            torch.softmax(teacher_logits_cs.detach().float(), dim=1)
+                            + torch.softmax(output_t1.detach().float(), dim=1)
+                            + torch.softmax(output_t2.detach().float(), dim=1)
+                        ) / 3.0
+                        prob_cons = prob_cons[pats_indices]
+                        pats_probs, pats_labels = prob_cons.max(dim=1)
                 confident = pats_probs >= args.reliab_ce_min_prob
                 if args.m1_topk_ratio > 0 and pats_probs.numel() > 0:
                     topk = max(1, int(round(args.m1_topk_ratio * pats_probs.numel())))
