@@ -217,6 +217,12 @@ def build_parser():
                             help='exponent applied to the prior ratio in D2')
     ours_group.add_argument('--m1_diag', action='store_true', default=False,
                             help='print unlabeled diagnostics used by the adaptive operator selection')
+    ours_group.add_argument('--m1_teacher_temperature', default=0.0, type=float,
+                            help='teacher temperature used before gating (0 disables)')
+    ours_group.add_argument('--m1_margin_gate', default=0.0, type=float,
+                            help='minimum teacher top1-top2 margin (0 disables)')
+    ours_group.add_argument('--m1_class_adaptive', default=0.0, type=float,
+                            help='rare-class threshold relaxation (0 disables)')
     return parser
 
 
