@@ -998,6 +998,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         print(format_target_diagnostic_summary(ep, target_diagnostic_state))
 
 
+from modules.ssti import refine_labels
+
 def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=None):
     """在目标域测试集上评估 F1/F2/ensemble，并返回后续汇总需要的预测结果。"""
     G.eval()

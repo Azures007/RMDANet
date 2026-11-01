@@ -674,6 +674,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         print(format_target_diagnostic_summary(ep, target_diagnostic_state))
 
 
+from modules.ssti import refine_labels
+
 def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None):
     G.eval()
     F1.eval()
