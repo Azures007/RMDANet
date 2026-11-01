@@ -54,8 +54,8 @@ def build_context(source_label_map, target_label_map, G, F1, source_loader,
     coords = np.nonzero(np.asarray(target_label_map) > 0)
     return {
         "transition": torch.from_numpy(transition).float().to(device),
-        "confusion": torch.from_numpy(conditional).float().to(device),
-        "source_prior": torch.from_numpy(source_prior).float().to(device),
+        "confusion": torch.from_numpy(conditional).float(),
+        "source_prior": torch.from_numpy(source_prior).float(),
         "coords": coords,
         "shape": np.asarray(target_label_map).shape,
         "num_classes": num_classes,
@@ -68,7 +68,7 @@ def target_prior_bias(context, target_predictions):
     histogram = np.zeros(num_classes, dtype=np.float64)
     np.add.at(histogram, target_predictions, 1.0)
     histogram = histogram / max(histogram.sum(), 1.0)
-    confusion = context["confusion"].numpy()
+    confusion = context["confusion"].cpu().numpy()
     try:
         estimated = np.linalg.lstsq(confusion, histogram, rcond=None)[0]
     except np.linalg.LinAlgError:
@@ -77,7 +77,7 @@ def target_prior_bias(context, target_predictions):
     if estimated.sum() <= 0:
         estimated = histogram.copy()
     estimated = (estimated + 1e-3) / (estimated.sum() + 1e-3 * num_classes)
-    source_prior = context["source_prior"].numpy()
+    source_prior = context["source_prior"].cpu().numpy()
     bias = np.log(estimated / np.clip(source_prior, 1e-8, None))
     bias = bias - bias.mean()
     return torch.from_numpy(bias).float().to(context["transition"].device)
