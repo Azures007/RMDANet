@@ -613,6 +613,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         all_loss = loss1 + loss2 + bnm_loss_a + contrastive_loss
 
         # ---- Ours: PATS-gated pseudo-label CE (M1) ----
+        sel_idx = None
+        sel_weight = None
         reliab_ce_weight = get_rampup_weight(
             ep, args.reliab_ce_start_epoch, args.reliab_ce_ramp_epochs, args.reliab_ce_weight
         )
@@ -771,7 +773,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
                 all_loss = all_loss + reliab_ce_weight * rel_ce
 
-        if args.m1_spatial_weight > 0 and spatial_map is not None and target_coords is not None:
+        if (args.m1_spatial_weight > 0 and spatial_map is not None
+                and target_coords is not None and sel_idx is not None and sel_idx.numel() > 0):
             height, width = int(spatial_map.shape[1]), int(spatial_map.shape[2])
             with torch.no_grad():
                 teacher_logits_sp, _ = F1_teacher.f(teacher_feat_t)
