@@ -170,6 +170,10 @@ def build_parser():
     eval_group = parser.add_argument_group('Evaluation')
     eval_group.add_argument('--eval_mode', default='ensemble', choices=['f1', 'f2', 'ensemble'],
                             help='prediction head used for reported OA/AA/Kappa')
+    eval_group.add_argument('--eval_teacher', action='store_true', default=False,
+                            help='include the EMA teacher head in the evaluation ensemble')
+    eval_group.add_argument('--eval_teacher_weight', default=0.34, type=float,
+                            help='weight of the EMA teacher logits in the evaluation ensemble')
     runtime_group.add_argument('--num_seeds', type=int, default=10,
                                help='number of seeds evaluated from SEEDS (default: all 10)')
     runtime_group.add_argument('--seed_offset', type=int, default=0,
@@ -664,7 +668,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         print(format_target_diagnostic_summary(ep, target_diagnostic_state))
 
 
-def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed):
+def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, teacher=None):
     G.eval()
     F1.eval()
     F2.eval()
@@ -687,6 +691,11 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed):
             logits1 = F1(output)
             logits2 = F2(output)
             ensemble_logits = 0.5 * (logits1 + logits2)
+            if teacher is not None and args.eval_teacher:
+                teacher_features, _ = teacher(data1)
+                teacher_logits, _ = teacher.f(teacher_features)
+                weight = float(args.eval_teacher_weight)
+                ensemble_logits = (1.0 - weight) * ensemble_logits + weight * teacher_logits
             eval_logits = select_eval_logits(logits1, logits2, args.eval_mode)
             test_loss += F.cross_entropy(eval_logits, target1.long(), reduction='sum').item()
 
@@ -799,7 +808,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         )
         if ep % num_epoch == 0:
             epoch_test_start = time.time()
-            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed)
+            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, F1_teacher)
             epoch_test_end = time.time()
 
             class_acc, kappa = update_dataset_metrics(metrics_state, dataset_index, test_result)
