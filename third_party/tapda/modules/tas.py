@@ -66,14 +66,16 @@ class TASState:
     def _update_domain_classifier(self, source_features, target_features):
         source_features = F.normalize(source_features.detach().float(), dim=1)
         target_features = F.normalize(target_features.detach().float(), dim=1)
-        logits_source = self.domain_classifier(source_features)
-        logits_target = self.domain_classifier(target_features)
-        loss = F.binary_cross_entropy_with_logits(
-            logits_source, torch.zeros_like(logits_source)
-        ) + F.binary_cross_entropy_with_logits(logits_target, torch.ones_like(logits_target))
-        self.domain_optimizer.zero_grad()
-        loss.backward()
-        self.domain_optimizer.step()
+        # The caller runs inside torch.no_grad(); re-enable grad for this local step only.
+        with torch.enable_grad():
+            logits_source = self.domain_classifier(source_features)
+            logits_target = self.domain_classifier(target_features)
+            loss = F.binary_cross_entropy_with_logits(
+                logits_source, torch.zeros_like(logits_source)
+            ) + F.binary_cross_entropy_with_logits(logits_target, torch.ones_like(logits_target))
+            self.domain_optimizer.zero_grad()
+            loss.backward()
+            self.domain_optimizer.step()
         return logits_source.detach(), logits_target.detach()
 
     @torch.no_grad()
