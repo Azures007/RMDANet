@@ -13,7 +13,7 @@ import torch
 
 class SourceConformal:
     def __init__(self, num_bins=20, device=None, default_threshold=0.95,
-                 min_kept=50, ema=0.9):
+                 min_kept=200, ema=0.9):
         self.num_bins = int(num_bins)
         self.device = device
         self.default_threshold = float(default_threshold)
@@ -31,8 +31,8 @@ class SourceConformal:
         bad_batch = torch.zeros(self.num_bins, device=self.device)
         ok_batch.index_add_(0, index, correct)
         bad_batch.index_add_(0, index, 1.0 - correct)
-        self.ok = self.ema * self.ok + (1.0 - self.ema) * ok_batch * 10.0
-        self.bad = self.ema * self.bad + (1.0 - self.ema) * bad_batch * 10.0
+        self.ok = self.ok + ok_batch
+        self.bad = self.bad + bad_batch
 
     @torch.no_grad()
     def threshold(self, epsilon):
