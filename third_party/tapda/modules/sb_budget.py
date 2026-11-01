@@ -31,11 +31,12 @@ class LearnableBudget:
 
     def step(self, probabilities, labels, min_tau=0.50, max_tau=0.999):
         """One coverage-calibration step; returns the detached budgets."""
-        budget = self.budgets(probabilities, labels)
-        coverage_loss = (budget.mean() - self.coverage) ** 2
-        self.optimizer.zero_grad()
-        coverage_loss.backward()
-        self.optimizer.step()
+        with torch.enable_grad():
+            budget = self.budgets(probabilities, labels)
+            coverage_loss = (budget.mean() - self.coverage) ** 2
+            self.optimizer.zero_grad()
+            coverage_loss.backward()
+            self.optimizer.step()
         with torch.no_grad():
             self.tau.clamp_(min_tau, max_tau)
         return budget.detach(), float(budget.mean().detach())
