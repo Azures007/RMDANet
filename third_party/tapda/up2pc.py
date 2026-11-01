@@ -344,6 +344,18 @@ def build_parser():
                             help='calibrate the teacher temperature on the labelled source domain before gating')
     ours_group.add_argument('--m1_agreement_strength', default=0.0, type=float,
                             help='weight each M1 sample by the dual-classifier agreement (0 disables)')
+    ours_group.add_argument('--sfda', action='store_true', default=False,
+                            help='source-free domain adaptation pipeline (source-only pretrain + target-only adaptation)')
+    ours_group.add_argument('--sfda_source_epochs', default=20, type=int,
+                            help='epochs of the source-only pretraining stage')
+    ours_group.add_argument('--sfda_target_epochs', default=30, type=int,
+                            help='epochs of the source-free adaptation stage')
+    ours_group.add_argument('--sfda_lr', default=0.05, type=float,
+                            help='learning rate of the source-only pretraining stage')
+    ours_group.add_argument('--sfda_tau', default=0.90, type=float,
+                            help='pseudo-label confidence threshold during adaptation')
+    ours_group.add_argument('--sfda_im_weight', default=0.10, type=float,
+                            help='weight of the information maximisation term')
     ours_group.add_argument('--crt_enable', action='store_true', default=False,
                             help='counterfactual reference teacher: gate supervision by drift from a lagged teacher')
     ours_group.add_argument('--crt_ref_alpha', default=0.995, type=float,
@@ -1325,6 +1337,24 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             use_spatial=False,
             use_guard=False,
         )
+
+    if getattr(args, 'sfda', False):
+        from modules.sfda import run_sfda_pipeline
+        run_sfda_pipeline(
+            G, F1, F2, train_loader, train_tar_loader, DEV, num_classes,
+            int(args.sfda_source_epochs), int(args.sfda_target_epochs),
+            float(args.sfda_lr), float(args.sfda_tau), float(args.sfda_im_weight),
+        )
+        test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed)
+        class_acc, kappa = update_dataset_metrics(metrics_state, dataset_index, test_result)
+        save_dataset_result(
+            output_dir, dataset_index, seed, test_result,
+            class_acc, kappa, test_result['acc_eval'], args.eval_mode,
+        )
+        now = time.time()
+        return test_result['acc_eval'], {
+            'train_start': now, 'train_end': now, 'test_start': now, 'test_end': now,
+        }
 
     epoch_train_start = time.time()
     epoch_test_start = epoch_train_start
