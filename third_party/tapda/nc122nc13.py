@@ -235,10 +235,12 @@ def build_parser():
                             help='counterfactual reference teacher: gate supervision by drift from a lagged teacher')
     ours_group.add_argument('--crt_ref_alpha', default=0.995, type=float,
                             help='EMA momentum of the lagged reference teacher')
-    ours_group.add_argument('--crt_keep_ratio', default=0.6, type=float,
-                            help='fraction of the selected samples kept by the bias quantile gate')
-    ours_group.add_argument('--crt_beta', default=5.0, type=float,
-                            help='exponential down-weighting strength of the confirmation-bias score')
+    ours_group.add_argument('--crt_keep_ratio', default=1.0, type=float,
+                            help='legacy quantile gate fraction (1.0 = disabled, robust gate is used)')
+    ours_group.add_argument('--crt_beta', default=1.0, type=float,
+                            help='down-weighting strength on the robust bias z-score')
+    ours_group.add_argument('--crt_outlier_k', default=2.5, type=float,
+                            help='robust z threshold above which a sample is treated as drifted')
     ours_group.add_argument('--instability_adaptive', action='store_true', default=False,
                             help='adapt the RGS weight from an early training-instability score (innovation 4)')
     ours_group.add_argument('--instability_threshold', default=0.10, type=float,
@@ -801,12 +803,15 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         reference_selected.argmax(dim=1)
                     ).float()
                     bias = kl_bias + label_bias
-                    if bias.numel() > 1 and args.crt_keep_ratio < 1.0:
-                        keep_threshold = torch.quantile(bias, args.crt_keep_ratio)
+                    if bias.numel() > 1:
+                        bias_median = bias.median()
+                        bias_mad = (bias - bias_median).abs().median().clamp_min(1e-6)
+                        bias_scale = 1.4826 * bias_mad
+                        excess = ((bias - bias_median) / bias_scale).clamp_min(0.0)
                     else:
-                        keep_threshold = bias.max()
-                    confident = confident & (bias <= keep_threshold)
-                crt_factor = torch.exp(-args.crt_beta * bias)
+                        excess = torch.zeros_like(bias)
+                    confident = confident & (excess <= args.crt_outlier_k)
+                crt_factor = torch.exp(-args.crt_beta * excess)
             else:
                 crt_factor = None
             if confident.any():
