@@ -760,12 +760,12 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             previous = _INSTABILITY_EMA['value']
             smoothed = instability if previous is None else 0.9 * previous + 0.1 * instability
             _INSTABILITY_EMA['value'] = smoothed
-            level = min(max(smoothed / max(args.instability_threshold, 1e-6), 0.0), 1.0)
+            level = min(max(smoothed / max(args.instability_threshold, 1e-6), 0.0), 1.0) ** 2
             adaptive_weight = args.instability_base_weight + (
                 args.instability_max_weight - args.instability_base_weight
             ) * level
             reliab_ce_weight = ramp_fraction * adaptive_weight
-            if batch_idx % 50 == 0:
+            if batch_idx % 10 == 0:
                 print(
                     f"[instability] ep={ep} agree={agreement:.3f} conf={confidence_mean:.4f} "
                     f"score={smoothed:.4f} weight={reliab_ce_weight:.4f}"
