@@ -71,6 +71,11 @@ SEEDS = [1726, 1040, 1885, 1083, 1937, 1921, 1270, 1343, 1914, 1077]
 _INSTABILITY_EMA = {'value': None}
 
 
+from modules.csr import CSRState
+
+_CSR_STATE = {'state': None}
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description='UP -> PC PDCL training')
 
@@ -359,6 +364,16 @@ def build_parser():
                             help='weight of the EMA teacher logits in the evaluation ensemble')
     eval_group.add_argument('--eval_bn_adapt', action='store_true', default=False,
                             help='re-estimate batch-norm statistics on the target test data before evaluation')
+    ours_group.add_argument('--csr', action='store_true', default=False,
+                            help='class-starvation revival: diagnose starved classes and revive their supervision')
+    ours_group.add_argument('--csr_start_epoch', default=10, type=int,
+                            help='epoch from which the starvation diagnosis is active')
+    ours_group.add_argument('--csr_starvation_ratio', default=0.3, type=float,
+                            help='a class is starved when prediction frequency / prior falls below this ratio')
+    ours_group.add_argument('--csr_threshold_mult', default=0.8, type=float,
+                            help='threshold multiplier for the starved classes')
+    ours_group.add_argument('--csr_quota', default=2, type=int,
+                            help='minimum number of starved-class samples kept per batch')
     return parser
 
 
@@ -834,6 +849,16 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         ) / 3.0
                         prob_cons = prob_cons[pats_indices]
                         pats_probs, pats_labels = prob_cons.max(dim=1)
+                if args.csr and ep >= args.csr_start_epoch and _CSR_STATE['state'] is not None:
+                    with torch.no_grad():
+                        _CSR_STATE['state'].update(F1_pseudo_label_t)
+                        _CSR_STATE['state'].ensure_ready()
+                        csr_multiplier = _CSR_STATE['state'].threshold_multiplier_vector()[pats_labels]
+                        csr_confident = pats_probs >= (args.reliab_ce_min_prob * csr_multiplier)
+                        csr_starved = _CSR_STATE['state'].starved_mask()[pats_labels]
+                else:
+                    csr_confident = None
+                    csr_starved = None
                 if args.m1_class_adaptive > 0 and pats_labels.numel() > 0:
                     prior_counts = torch.bincount(
                         F1_pseudo_label_t.detach().long(), minlength=num_classes
@@ -880,6 +905,10 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         print(f"[diag] ep={ep} sel_all={batch_n} confident={sel_n} "
                               f"conf={sel_mean:.4f}+-{sel_std:.4f} "
                               f"gini_all={gini_all:.4f} gini_sel={gini_sel:.4f}")
+            if csr_confident is not None:
+                confident = confident & csr_confident
+                if bool(csr_starved.any()):
+                    confident = _CSR_STATE['state'].apply_quota(confident, pats_labels)
             if confident.any():
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
@@ -1264,6 +1293,15 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
+    _CSR_STATE['state'] = (
+        CSRState(
+            num_classes, DEV, source_loader=train_loader, G=G, F1=F1,
+            starvation_ratio=args.csr_starvation_ratio,
+            threshold_multiplier=args.csr_threshold_mult,
+            quota=args.csr_quota,
+        )
+        if getattr(args, 'csr', False) else None
+    )
     ssti_context = None
     if getattr(args, 'ssti', False):
         from modules.ssti import build_context
