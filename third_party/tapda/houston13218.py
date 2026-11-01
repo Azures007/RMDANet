@@ -362,6 +362,12 @@ def build_parser():
                             help='temperature applied to the logits before the ICM')
     ours_group.add_argument('--ssti_conf_threshold', default=0.95, type=float,
                             help='only pixels below this confidence may be relabelled by the ICM')
+    eval_group.add_argument('--eval_teacher', action='store_true', default=False,
+                            help='include the EMA teacher head in the evaluation ensemble')
+    eval_group.add_argument('--eval_teacher_weight', default=0.34, type=float,
+                            help='weight of the EMA teacher logits in the evaluation ensemble')
+    eval_group.add_argument('--eval_bn_adapt', action='store_true', default=False,
+                            help='re-estimate batch-norm statistics on the target test data before evaluation')
     return parser
 
 
@@ -1116,8 +1122,14 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 from modules.ssti import refine_labels
 
-def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=None):
+def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     """在目标域测试集上评估 F1/F2/ensemble，并返回后续汇总需要的预测结果。"""
+    if getattr(args, 'eval_bn_adapt', False) and teacher is None:
+        G.train()
+        F1.train()
+        with torch.no_grad():
+            for data, _ in test_loader:
+                G(data.to(device))
     G.eval()
     F1.eval()
     F2.eval()
@@ -1140,6 +1152,14 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             logits1 = F1(output)
             logits2 = F2(output)
             ensemble_logits = 0.5 * (logits1 + logits2)
+            if teacher is not None and args.eval_teacher:
+                teacher_output = teacher(data1)
+                teacher_features = teacher_output[2] if isinstance(teacher_output, (tuple, list)) else teacher_output
+                teacher_logits = teacher.f(teacher_features)
+                if isinstance(teacher_logits, (tuple, list)):
+                    teacher_logits = teacher_logits[0]
+                weight = float(args.eval_teacher_weight)
+                ensemble_logits = (1.0 - weight) * ensemble_logits + weight * teacher_logits
             eval_logits = select_eval_logits(logits1, logits2, args.eval_mode)
             eval_logits_batches.append(eval_logits.detach().cpu())
             test_loss += F.cross_entropy(eval_logits, target1.long(), reduction='sum').item()
@@ -1313,7 +1333,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         )
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
-            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context)
+            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
             epoch_test_end = time.time()
 
             if (not args.eval_every_epoch) or test_result['acc_eval'] > best_seed_acc:
