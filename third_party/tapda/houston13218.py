@@ -1190,6 +1190,8 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
                 weight = float(args.eval_teacher_weight)
                 ensemble_logits = (1.0 - weight) * ensemble_logits + weight * teacher_logits
             eval_logits = select_eval_logits(logits1, logits2, args.eval_mode)
+            if teacher is not None and args.eval_teacher and args.eval_mode == 'ensemble':
+                eval_logits = ensemble_logits
             eval_logits_batches.append(eval_logits.detach().cpu())
             test_loss += F.cross_entropy(eval_logits, target1.long(), reduction='sum').item()
 
