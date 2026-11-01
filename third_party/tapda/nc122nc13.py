@@ -754,7 +754,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         )
                     if transferability is not None:
                         per_class_threshold = pats_probs.new_tensor(args.reliab_ce_min_prob) * (
-                            1.05 - args.tas_threshold_scale * transferability[pats_labels]
+                            1.0 - args.tas_threshold_scale * (transferability[pats_labels] - 1.0)
                         )
                         tas_confident = pats_probs >= per_class_threshold
                         tas_weight = args.tas_weight_floor + (
