@@ -49,14 +49,7 @@ class CSRState:
         self.pred_hist = self.ema * self.pred_hist + (1.0 - self.ema) * counts
 
     @torch.no_grad()
-    def ensure_ready(self):
-        if self.prior is not None:
-            return
-        if self.source_loader is None or self.G is None or self.F1 is None:
-            self.prior = torch.full((self.num_classes,), 1.0 / self.num_classes, device=self.device)
-            return
-        self.G.eval()
-        self.F1.eval()
+    def _source_confusion(self):
         confusion = np.zeros((self.num_classes, self.num_classes), dtype=np.float64)
         for index, (data, target) in enumerate(self.source_loader):
             if index >= 100:
@@ -72,6 +65,25 @@ class CSRState:
                 (target.cpu().numpy(), output.argmax(dim=1).cpu().numpy()),
                 1.0,
             )
+        return confusion
+
+    @torch.no_grad()
+    def ensure_ready(self):
+        if self.prior is not None:
+            return
+        if self.source_loader is None or self.G is None or self.F1 is None:
+            self.prior = torch.full((self.num_classes,), 1.0 / self.num_classes, device=self.device)
+            return
+        g_was_training = self.G.training
+        f_was_training = self.F1.training
+        self.G.eval()
+        self.F1.eval()
+        try:
+            confusion = self._source_confusion()
+        finally:
+            self.G.train(g_was_training)
+            self.F1.train(f_was_training)
+        row_sum = confusion.sum(axis=1, keepdims=True)
         row_sum = confusion.sum(axis=1, keepdims=True)
         row_sum[row_sum == 0] = 1.0
         conditional = confusion / row_sum
