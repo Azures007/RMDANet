@@ -1135,9 +1135,13 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         from modules.ssti import build_context
         source_label_map = utils.load_data_pavia(data_path_s, label_path_s)[1]
         target_label_map = utils.load_data_pavia(data_path_t, label_path_t)[1]
+        permutation = np.asarray(data['RandPerm'], dtype=np.int64)
+        rows = np.asarray(data['Row'], dtype=np.int64)[permutation] - halfwidth
+        cols = np.asarray(data['Column'], dtype=np.int64)[permutation] - halfwidth
         ssti_context = build_context(
             source_label_map, target_label_map, num_classes, DEV,
             source_loader=train_loader, G=G, F1=F1,
+            coords=(rows, cols),
         )
     prat_full = None
     if getattr(args, 'prat_full_mode', 'off') != 'off':

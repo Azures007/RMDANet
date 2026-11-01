@@ -51,20 +51,24 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
 
 
 def build_context(source_label_map, target_label_map, num_classes, device,
-                  source_loader=None, G=None, F1=None, smoothing=0.1):
+                  source_loader=None, G=None, F1=None, smoothing=0.1, coords=None):
     transition = build_transition_prior(source_label_map, num_classes, smoothing)
     source_map = np.asarray(source_label_map).astype(np.int64)
     histogram = np.array(
         [(source_map == c).sum() for c in range(1, num_classes + 1)], dtype=np.float64
     )
     source_prior = (histogram + 1.0) / (histogram.sum() + num_classes)
-    coords = np.nonzero(np.asarray(target_label_map) > 0)
+    if coords is None:
+        coords = np.nonzero(np.asarray(target_label_map) > 0)
+    else:
+        coords = (np.asarray(coords[0], dtype=np.int64), np.asarray(coords[1], dtype=np.int64))
     return {
         "transition": torch.from_numpy(transition).float().to(device),
         "confusion": None,
         "source_prior": torch.from_numpy(source_prior).float(),
         "coords": coords,
         "shape": np.asarray(target_label_map).shape,
+        "target_map": np.asarray(target_label_map).astype(np.int64),
         "num_classes": num_classes,
         "source_loader": source_loader,
         "G": G,
@@ -117,6 +121,10 @@ def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
     log_probability = F.log_softmax(logits.to(device) / float(temperature), dim=1)
 
     initial = log_probability.argmax(dim=1).cpu().numpy()
+    if len(initial) != len(rows):
+        raise ValueError(
+            f"SSTI: {len(initial)} predictions but {len(rows)} coordinates"
+        )
     maximum = log_probability.max(dim=1).values
     editable = (maximum < float(confidence_threshold)).cpu().numpy()
     bias = target_prior_bias(context, initial)
