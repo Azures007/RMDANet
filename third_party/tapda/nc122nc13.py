@@ -229,6 +229,12 @@ def build_parser():
                             help='class-balanced weighting of the M1 loss')
     ours_group.add_argument('--m1_source_threshold', default=0.0, type=float,
                             help='per-class threshold adjustment from source per-class accuracy')
+    ours_group.add_argument('--m1_view_consistency', default='none', choices=['none', 'noise', 'flip'],
+                            help='input-level view consistency operator (noise perturbation or flip)')
+    ours_group.add_argument('--m1_view_weight', default=0.1, type=float,
+                            help='weight of the view-consistency JS loss')
+    ours_group.add_argument('--m1_view_strength', default=0.05, type=float,
+                            help='noise strength of the noise view')
     return parser
 
 
@@ -740,6 +746,23 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     ce_all = F.cross_entropy(output_t1[sel_idx], sel_labels, reduction='none')
                 rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
                 all_loss = all_loss + reliab_ce_weight * rel_ce
+
+        # ---- view-consistency operator (input level) ----
+        if args.m1_view_consistency != 'none' and args.m1_view_weight > 0:
+            if args.m1_view_consistency == 'noise':
+                view = data2 + args.m1_view_strength * torch.randn_like(data2) * data2.std()
+            else:
+                view = torch.flip(data2, dims=[3])
+            view_feat, _ = G(view)
+            view_logits = F1(view_feat)[0]
+            base_prob = torch.softmax(output_t1.detach().float(), dim=1).clamp_min(1e-8)
+            view_prob = torch.softmax(view_logits.float(), dim=1).clamp_min(1e-8)
+            mean_prob = 0.5 * (base_prob + view_prob)
+            js_loss = 0.5 * (
+                (base_prob * (base_prob / mean_prob).log()).sum(dim=1).mean()
+                + (view_prob * (view_prob / mean_prob).log()).sum(dim=1).mean()
+            )
+            all_loss = all_loss + args.m1_view_weight * js_loss
 
         if args.log_results:
             wandb.log({f'{seed}_A_loss': all_loss})
