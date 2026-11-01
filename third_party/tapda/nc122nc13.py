@@ -235,6 +235,12 @@ def build_parser():
                             help='weight of the view-consistency JS loss')
     ours_group.add_argument('--m1_view_strength', default=0.05, type=float,
                             help='noise strength of the noise view')
+    ours_group.add_argument('--m1_spatial_weight', default=0.0, type=float,
+                            help='weight of the spatial-neighbourhood consistency supervision (0 disables)')
+    ours_group.add_argument('--m1_spatial_alpha', default=0.5, type=float,
+                            help='blend ratio between the teacher probability and its neighbourhood mean')
+    ours_group.add_argument('--m1_spatial_map_decay', default=0.9, type=float,
+                            help='EMA decay of the running target probability map')
     return parser
 
 
@@ -385,7 +391,12 @@ def load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_
         data_s, label_s, halfwidth
     )
 
+    target_coords = np.stack(
+        [row[rand_perm] - halfwidth, column[rand_perm] - halfwidth], axis=1
+    ).astype(np.int64)
     return {
+        'targetCoords': target_coords,
+        'targetHW': (int(data_t.shape[0]), int(data_t.shape[1])),
         'trainX': train_x,
         'trainY': train_y,
         'testX': test_x,
@@ -399,13 +410,26 @@ def load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_
     }
 
 
+class IndexedTensorDataset(torch.utils.data.Dataset):
+    def __init__(self, data, target):
+        self.data = data
+        self.target = target
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, index):
+        return self.data[index], self.target[index], index
+
+
 def create_data_loaders(train_x, train_y, test_x, test_y, test_x_s, test_y_s, batch_size):
     test_source_dataset = TensorDataset(torch.tensor(test_x_s), torch.tensor(test_y_s))
     train_dataset = TensorDataset(torch.tensor(train_x), torch.tensor(train_y))
     test_dataset = TensorDataset(torch.tensor(test_x), torch.tensor(test_y))
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
-    train_tar_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    indexed_test_dataset = IndexedTensorDataset(torch.tensor(test_x), torch.tensor(test_y))
+    train_tar_loader = DataLoader(indexed_test_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     source_test_loader = DataLoader(test_source_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
@@ -478,7 +502,7 @@ def initialize_models_and_optimizers(n_bands, patch_size, num_classes, device, a
 def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 contrastive_loss_func, optimizer_g, optimizer_f,
                 batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-                source_prototype_state):
+                source_prototype_state, target_coords=None, spatial_map=None):
     iter_source, iter_target = iter(train_loader), iter(train_tar_loader)
     criterion = nn.CrossEntropyLoss().to(DEV)
     G.train()
@@ -494,7 +518,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if batch_idx % len(train_tar_loader) == 0:
             iter_target = iter(train_tar_loader)
         data_source, label_source = next(iter_source)
-        data_target, label_target = next(iter_target)
+        data_target, label_target, target_ids = next(iter_target)
         if args.cuda:
             data1, target1 = data_source.cuda(), label_source.cuda()
             data2 = data_target.cuda()
@@ -747,6 +771,38 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 rel_ce = (ce_all * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
                 all_loss = all_loss + reliab_ce_weight * rel_ce
 
+        if args.m1_spatial_weight > 0 and spatial_map is not None and target_coords is not None:
+            height, width = int(spatial_map.shape[1]), int(spatial_map.shape[2])
+            with torch.no_grad():
+                teacher_logits_sp, _ = F1_teacher.f(teacher_feat_t)
+                teacher_prob_sp = torch.softmax(teacher_logits_sp.detach().float(), dim=1)
+                sample_rows = target_coords[target_ids.long(), 0].clamp(0, height - 1)
+                sample_cols = target_coords[target_ids.long(), 1].clamp(0, width - 1)
+                map_flat = spatial_map.view(num_classes, height * width)
+                flat_index = sample_rows * width + sample_cols
+                previous = map_flat[:, flat_index].clone()
+                map_flat[:, flat_index] = (
+                    args.m1_spatial_map_decay * previous
+                    + (1.0 - args.m1_spatial_map_decay) * teacher_prob_sp.t()
+                )
+                neighbour_probs = []
+                for d_row, d_col in ((-1, 0), (1, 0), (0, -1), (0, 1),
+                                     (-1, -1), (-1, 1), (1, -1), (1, 1)):
+                    neighbour_rows = (sample_rows + d_row).clamp(0, height - 1)
+                    neighbour_cols = (sample_cols + d_col).clamp(0, width - 1)
+                    neighbour_probs.append(map_flat[:, neighbour_rows * width + neighbour_cols])
+                neighbour_mean = torch.stack(neighbour_probs, dim=0).mean(dim=0).t()
+            soft_target = (
+                (1.0 - args.m1_spatial_alpha) * teacher_prob_sp
+                + args.m1_spatial_alpha * neighbour_mean
+            )
+            soft_target = soft_target / soft_target.sum(dim=1, keepdim=True).clamp_min(1e-8)
+            log_student_sp = F.log_softmax(output_t1[sel_idx].float(), dim=1)
+            spatial_ce = -(soft_target[sel_idx] * log_student_sp).sum(dim=1)
+            all_loss = all_loss + args.m1_spatial_weight * (
+                (spatial_ce * sel_weight).sum() / sel_weight.sum().clamp_min(1e-6)
+            )
+
         # ---- view-consistency operator (input level) ----
         if args.m1_view_consistency != 'none' and args.m1_view_weight > 0:
             if args.m1_view_consistency == 'noise':
@@ -955,6 +1011,12 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
+    spatial_map = None
+    target_coords = None
+    if getattr(args, 'm1_spatial_weight', 0.0) > 0:
+        height, width = data['targetHW']
+        spatial_map = torch.zeros(num_classes, height, width, device=DEV)
+        target_coords = torch.tensor(data['targetCoords'], device=DEV)
 
     epoch_train_start = time.time()
     epoch_test_start = epoch_train_start
@@ -964,7 +1026,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             contrastive_loss_func, optimizer_g, optimizer_f,
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-            source_prototype_state,
+            source_prototype_state, target_coords, spatial_map,
         )
         if ep % num_epoch == 0:
             epoch_test_start = time.time()
