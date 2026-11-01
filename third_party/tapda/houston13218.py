@@ -74,6 +74,10 @@ _INSTABILITY_EMA = {'value': None}
 _CALIBRATION = {'temperature': 1.0}
 
 
+_CALIBRATION = {'temperature': 1.0}
+_REFERENCE_TEACHER = {'ref': None}
+
+
 def build_parser():
     """构建命令行参数；这里只保留当前训练/评估/日志路径实际读取的配置。"""
     parser = argparse.ArgumentParser(description='Houston13 -> Houston18 DCL/BNM training')
@@ -349,6 +353,14 @@ def build_parser():
                             help='calibrate the teacher temperature on the labelled source domain before gating')
     ours_group.add_argument('--m1_agreement_strength', default=0.0, type=float,
                             help='weight each M1 sample by the dual-classifier agreement (0 disables)')
+    ours_group.add_argument('--crt_enable', action='store_true', default=False,
+                            help='counterfactual reference teacher: gate supervision by drift from a lagged teacher')
+    ours_group.add_argument('--crt_ref_alpha', default=0.995, type=float,
+                            help='EMA momentum of the lagged reference teacher')
+    ours_group.add_argument('--crt_keep_ratio', default=0.6, type=float,
+                            help='fraction of the selected samples kept by the bias quantile gate')
+    ours_group.add_argument('--crt_beta', default=5.0, type=float,
+                            help='exponential down-weighting strength of the confirmation-bias score')
     ours_group.add_argument('--instability_adaptive', action='store_true', default=False,
                             help='adapt the RGS weight from an early training-instability score (innovation 4)')
     ours_group.add_argument('--instability_threshold', default=0.10, type=float,
@@ -588,6 +600,8 @@ def initialize_models_and_optimizers(N_BANDS, patch_size, num_classes, DEV, args
         F2.apply(weights_init)
 
     F1_teacher = EMATeacher(G, F1, alpha=args.alpha, pseudo_label_weight=args.pseudo_label_weight).to(DEV)
+    F1_reference = EMATeacher(G, F1, alpha=args.crt_ref_alpha, pseudo_label_weight='prob').to(DEV)
+    _REFERENCE_TEACHER['ref'] = F1_reference
     contrastive_loss_func = SupConLoss(
         temperature=args.supcon_temperature,
         contrast_mode=args.supcon_contrast_mode,
@@ -664,6 +678,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         data = Variable(torch.cat((data1, data2), 0))
         target1 = Variable(target1)
         F1_teacher.update_weights(G, F1, ep * num_iter + batch_idx)
+        if _REFERENCE_TEACHER['ref'] is not None:
+            _REFERENCE_TEACHER['ref'].update_weights(G, F1, ep * num_iter + batch_idx)
         F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t, teacher_proj_t = F1_teacher(data2)
 
         _, _, teacher_feat_s, teacher_proj_s = F1_teacher(data1)
@@ -894,11 +910,36 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         print(f"[diag] ep={ep} sel_all={batch_n} confident={sel_n} "
                               f"conf={sel_mean:.4f}+-{sel_std:.4f} "
                               f"gini_all={gini_all:.4f} gini_sel={gini_sel:.4f}")
+            reference_teacher = _REFERENCE_TEACHER['ref']
+            if args.crt_enable and reference_teacher is not None:
+                with torch.no_grad():
+                    _, _, reference_features, _ = reference_teacher(data2)
+                    reference_logits, _ = reference_teacher.f(reference_features)
+                    reference_prob = torch.softmax(reference_logits.detach().float(), dim=1)
+                    main_logits_crt, _ = F1_teacher.f(teacher_feat_t)
+                    main_prob_crt = torch.softmax(main_logits_crt.detach().float(), dim=1)
+                    main_selected = main_prob_crt[pats_indices].clamp_min(1e-8)
+                    reference_selected = reference_prob[pats_indices].clamp_min(1e-8)
+                    kl_bias = (main_selected * (main_selected / reference_selected).log()).sum(dim=1)
+                    label_bias = main_selected.argmax(dim=1).ne(
+                        reference_selected.argmax(dim=1)
+                    ).float()
+                    bias = kl_bias + label_bias
+                    if bias.numel() > 1 and args.crt_keep_ratio < 1.0:
+                        keep_threshold = torch.quantile(bias, args.crt_keep_ratio)
+                    else:
+                        keep_threshold = bias.max()
+                    confident = confident & (bias <= keep_threshold)
+                crt_factor = torch.exp(-args.crt_beta * bias)
+            else:
+                crt_factor = None
             if confident.any():
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if crt_factor is not None:
+                    sel_weight = sel_weight * crt_factor[confident]
                 if args.m1_agreement_strength > 0:
                     with torch.no_grad():
                         dual_agreement = (
