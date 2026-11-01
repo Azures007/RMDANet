@@ -75,9 +75,9 @@ class TheoryBudget:
             observed, distance_sum / class_count.clamp_min(1.0), self.variance
         )
         self.variance = self.ema * self.variance + (1.0 - self.ema) * batch_variance
-        self.count = self.ema * self.count + (1.0 - self.ema) * class_count
+        self.count = self.count + class_count
 
-        valid = (self.count > 20) & observed_accuracy
+        valid = (self.count > 50) & observed_accuracy
         if int(valid.sum().item()) < 2:
             return None
         score = (

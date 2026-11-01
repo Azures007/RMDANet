@@ -480,7 +480,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         data = Variable(torch.cat((data1, data2), 0))
         target1 = Variable(target1)
         F1_teacher.update_weights(G, F1, ep * num_iter + batch_idx)
-        F1_pseudo_label_t, F1_pseudo_prob_t, _, teacher_proj_t = F1_teacher(data2)
+        F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t, teacher_proj_t = F1_teacher(data2)
 
         _, _, teacher_feat_s, teacher_proj_s = F1_teacher(data1)
         _, student_proj_s = G(data1)
