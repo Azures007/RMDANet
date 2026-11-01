@@ -70,6 +70,11 @@ from modules.tas import TASState
 _TAS_STATE = {'state': None}
 
 
+from modules.sb_budget import LearnableBudget
+
+_SB_STATE = {'budget': None}
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description='NC12 -> NC13 PDCL training')
 
@@ -256,6 +261,16 @@ def build_parser():
                             help='per-class threshold adjustment strength')
     ours_group.add_argument('--tas_weight_floor', default=0.5, type=float,
                             help='minimum per-class supervision weight')
+    ours_group.add_argument('--sb_learnable', action='store_true', default=False,
+                            help='learnable supervision budget: per-class soft threshold calibrated to a coverage target')
+    ours_group.add_argument('--sb_coverage', default=0.6, type=float,
+                            help='target average budget (coverage) of the learnable budget')
+    ours_group.add_argument('--sb_tau_lr', default=0.01, type=float,
+                            help='learning rate of the per-class budget threshold')
+    ours_group.add_argument('--sb_initial_tau', default=0.95, type=float,
+                            help='initial value of the per-class budget threshold')
+    ours_group.add_argument('--sb_temperature', default=0.02, type=float,
+                            help='temperature of the soft budget gate')
     ours_group.add_argument('--crt_enable', action='store_true', default=False,
                             help='counterfactual reference teacher: gate supervision by drift from a lagged teacher')
     ours_group.add_argument('--crt_ref_alpha', default=0.995, type=float,
@@ -746,6 +761,15 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         teacher_logits_tp.detach().float() / args.m1_teacher_temperature, dim=1
                     )[pats_indices]
                     pats_probs, pats_labels = teacher_prob_tp.max(dim=1)
+                if args.sb_learnable and _SB_STATE['budget'] is not None:
+                    with torch.no_grad():
+                        budget, observed_coverage = _SB_STATE['budget'].step(
+                            pats_probs, pats_labels
+                        )
+                    sb_weight = budget
+                    confident = budget >= 0.5
+                else:
+                    sb_weight = None
                 if args.tas_enable and ep >= args.tas_start_epoch and _TAS_STATE['state'] is not None:
                     with torch.no_grad():
                         transferability = _TAS_STATE['state'].update_and_transferability(
@@ -862,6 +886,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if sb_weight is not None:
+                    sel_weight = sel_weight * sb_weight[confident]
                 if tas_weight is not None:
                     sel_weight = sel_weight * tas_weight[confident]
                 if crt_factor is not None:
@@ -1186,6 +1212,11 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_g = models['optimizer_g']
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
+    _SB_STATE['budget'] = (
+        LearnableBudget(num_classes, args.sb_initial_tau, args.sb_tau_lr,
+                        args.sb_coverage, args.sb_temperature, DEV)
+        if getattr(args, 'sb_learnable', False) else None
+    )
     _TAS_STATE['state'] = (
         TASState(num_classes, 152, DEV)
         if getattr(args, 'tas_enable', False) else None
