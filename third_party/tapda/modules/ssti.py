@@ -107,8 +107,8 @@ def target_prior_bias(context, target_predictions):
     return torch.from_numpy(bias).float().to(context["device"])
 
 
-def refine_labels(logits, context, labels, alpha=0.3, beta=0.5, iterations=3,
-                  temperature=1.0, device=None):
+def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
+                  temperature=1.0, confidence_threshold=0.95, device=None):
     context = ensure_ready(context)
     device = device if device is not None else context["device"]
     num_classes = context["num_classes"]
@@ -117,6 +117,8 @@ def refine_labels(logits, context, labels, alpha=0.3, beta=0.5, iterations=3,
     log_probability = F.log_softmax(logits.to(device) / float(temperature), dim=1)
 
     initial = log_probability.argmax(dim=1).cpu().numpy()
+    maximum = log_probability.max(dim=1).values
+    editable = (maximum < float(confidence_threshold)).cpu().numpy()
     bias = target_prior_bias(context, initial)
     log_transition = torch.log(context["transition"].clamp_min(1e-8))
 
@@ -145,6 +147,8 @@ def refine_labels(logits, context, labels, alpha=0.3, beta=0.5, iterations=3,
             neighbour_score[valid_index] += log_transition[:, neighbour_labels].t()
         score = log_probability + alpha * bias.unsqueeze(0) + beta * neighbour_score
         refined = score.argmax(dim=1).cpu().numpy()
+        # Only the uncertain pixels may change; confident predictions are frozen.
+        refined = np.where(editable, refined, initial)
         grid[rows, cols] = refined
 
     return np.asarray(grid[rows, cols], dtype=np.int64)

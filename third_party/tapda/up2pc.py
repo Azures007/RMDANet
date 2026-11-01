@@ -318,6 +318,8 @@ def build_parser():
                             help='number of ICM iterations')
     ours_group.add_argument('--ssti_temperature', default=1.0, type=float,
                             help='temperature applied to the logits before the ICM')
+    ours_group.add_argument('--ssti_conf_threshold', default=0.95, type=float,
+                            help='only pixels below this confidence may be relabelled by the ICM')
     return parser
 
 
@@ -1043,6 +1045,7 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                 logits_all, ssti_context, labels,
                 alpha=args.ssti_alpha, beta=args.ssti_beta,
                 iterations=args.ssti_iters, temperature=args.ssti_temperature,
+                confidence_threshold=args.ssti_conf_threshold,
             )
             predict_ensemble = refined
             acc_ensemble = 100. * float((refined == labels).sum()) / float(len_tar_dataset)
