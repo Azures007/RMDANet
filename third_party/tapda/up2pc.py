@@ -88,6 +88,11 @@ from modules.sb_budget import LearnableBudget
 _SB_STATE = {'budget': None}
 
 
+from modules.sb_theory import TheoryBudget
+
+_SB_THEORY = {'state': None}
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description='UP -> PC PDCL training')
 
@@ -384,6 +389,12 @@ def build_parser():
                             help='initial value of the per-class budget threshold')
     ours_group.add_argument('--sb_temperature', default=0.02, type=float,
                             help='temperature of the soft budget gate')
+    ours_group.add_argument('--sb_theory', action='store_true', default=False,
+                            help='theory-driven per-class budget (bias-variance style score)')
+    ours_group.add_argument('--sb_theory_start_epoch', default=15, type=int,
+                            help='epoch from which the theory budget is applied')
+    ours_group.add_argument('--sb_theory_ema', default=0.9, type=float,
+                            help='EMA of the per-class statistics')
     ours_group.add_argument('--crt_enable', action='store_true', default=False,
                             help='counterfactual reference teacher: gate supervision by drift from a lagged teacher')
     ours_group.add_argument('--crt_ref_alpha', default=0.995, type=float,
@@ -883,6 +894,18 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         ) / 3.0
                         prob_cons = prob_cons[pats_indices]
                         pats_probs, pats_labels = prob_cons.max(dim=1)
+                if (args.sb_theory and ep >= args.sb_theory_start_epoch
+                        and _SB_THEORY['state'] is not None):
+                    with torch.no_grad():
+                        theory_budget = _SB_THEORY['state'].update(
+                            F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t,
+                            target1, output_s1,
+                        )
+                    theory_factor = (
+                        theory_budget[pats_labels] if theory_budget is not None else None
+                    )
+                else:
+                    theory_factor = None
                 if args.sb_learnable and _SB_STATE['budget'] is not None:
                     with torch.no_grad():
                         budget, observed_coverage = _SB_STATE['budget'].step(
@@ -1004,6 +1027,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if theory_factor is not None:
+                    sel_weight = sel_weight * theory_factor[confident]
                 if sb_weight is not None:
                     sel_weight = sel_weight * sb_weight[confident]
                 if tas_weight is not None:
@@ -1370,6 +1395,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_g = models['optimizer_g']
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
+    _SB_THEORY['state'] = (
+        TheoryBudget(num_classes, 152, args.sb_theory_ema, DEV)
+        if getattr(args, 'sb_theory', False) else None
+    )
     _SB_STATE['budget'] = (
         LearnableBudget(num_classes, args.sb_initial_tau, args.sb_tau_lr,
                         args.sb_coverage, args.sb_temperature, DEV)
