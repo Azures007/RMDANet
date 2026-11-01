@@ -782,8 +782,6 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
-                if theory_factor is not None:
-                    sel_weight = sel_weight * theory_factor[confident]
                 if args.m1_class_cap > 0 and sel_idx.numel() > 0:
                     keep = torch.zeros_like(sel_labels, dtype=torch.bool)
                     for class_id in sel_labels.unique().tolist():
@@ -817,6 +815,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     )
                 else:
                     theory_factor = None
+                if theory_factor is not None and sel_weight.numel() > 0:
+                    sel_weight = sel_weight * theory_factor[confident]
                 if args.m1_maturity_gate and sel_weight.numel() > 0:
                     maturity = float(sel_probs.mean().item())
                     span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
