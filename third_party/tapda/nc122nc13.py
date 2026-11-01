@@ -225,6 +225,8 @@ def build_parser():
                             help='print unlabeled diagnostics used by the adaptive operator selection')
     ours_group.add_argument('--src_calibration', action='store_true', default=False,
                             help='calibrate the teacher temperature on the labelled source domain before gating')
+    ours_group.add_argument('--m1_agreement_strength', default=0.0, type=float,
+                            help='weight each M1 sample by the dual-classifier agreement (0 disables)')
     ours_group.add_argument('--instability_adaptive', action='store_true', default=False,
                             help='adapt the RGS weight from an early training-instability score (innovation 4)')
     ours_group.add_argument('--instability_threshold', default=0.10, type=float,
@@ -773,6 +775,16 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if args.m1_agreement_strength > 0:
+                    with torch.no_grad():
+                        dual_agreement = (
+                            output_t1[sel_idx].detach().argmax(dim=1)
+                            == output_t2[sel_idx].detach().argmax(dim=1)
+                        ).float()
+                    sel_weight = sel_weight * (
+                        (1.0 - args.m1_agreement_strength)
+                        + args.m1_agreement_strength * dual_agreement
+                    )
                 if args.reliab_ce_balance != 'none' and sel_labels.numel() > 0:
                     class_counts = torch.bincount(sel_labels.long(), minlength=num_classes).float()
                     class_freq = class_counts[sel_labels.long()].clamp_min(1.0)
