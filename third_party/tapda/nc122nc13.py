@@ -55,6 +55,9 @@ YRD_DATA_PATHS = {
 SEEDS = [1838, 1785, 1433, 1621, 1353, 1896, 1598, 1869, 1700, 1814]
 
 
+_INSTABILITY_EMA = {'value': None}
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description='NC12 -> NC13 PDCL training')
 
@@ -217,6 +220,14 @@ def build_parser():
                             help='exponent applied to the prior ratio in D2')
     ours_group.add_argument('--m1_diag', action='store_true', default=False,
                             help='print unlabeled diagnostics used by the adaptive operator selection')
+    ours_group.add_argument('--instability_adaptive', action='store_true', default=False,
+                            help='adapt the RGS weight from an early training-instability score (innovation 4)')
+    ours_group.add_argument('--instability_threshold', default=0.10, type=float,
+                            help='instability score at which the adaptive weight reaches its maximum')
+    ours_group.add_argument('--instability_base_weight', default=0.02, type=float,
+                            help='RGS weight used for a stable run')
+    ours_group.add_argument('--instability_max_weight', default=0.10, type=float,
+                            help='RGS weight used for an unstable run')
     ours_group.add_argument('--m1_teacher_temperature', default=0.0, type=float,
                             help='teacher temperature used before gating (0 disables)')
     ours_group.add_argument('--m1_margin_gate', default=0.0, type=float,
@@ -617,9 +628,32 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         # ---- Ours: PATS-gated pseudo-label CE (M1) ----
         sel_idx = None
         sel_weight = None
-        reliab_ce_weight = get_rampup_weight(
-            ep, args.reliab_ce_start_epoch, args.reliab_ce_ramp_epochs, args.reliab_ce_weight
+        ramp_fraction = get_rampup_weight(
+            ep, args.reliab_ce_start_epoch, args.reliab_ce_ramp_epochs, 1.0
         )
+        reliab_ce_weight = ramp_fraction * args.reliab_ce_weight
+        if args.instability_adaptive:
+            with torch.no_grad():
+                probability_1 = torch.softmax(output_t1.detach().float(), dim=1)
+                probability_2 = torch.softmax(output_t2.detach().float(), dim=1)
+                agreement = float(
+                    probability_1.argmax(dim=1).eq(probability_2.argmax(dim=1)).float().mean()
+                )
+                confidence_mean = float(F1_pseudo_prob_t.detach().float().mean())
+                instability = (1.0 - agreement) + max(0.0, 0.995 - confidence_mean) * 2.0
+            previous = _INSTABILITY_EMA['value']
+            smoothed = instability if previous is None else 0.9 * previous + 0.1 * instability
+            _INSTABILITY_EMA['value'] = smoothed
+            level = min(max(smoothed / max(args.instability_threshold, 1e-6), 0.0), 1.0)
+            adaptive_weight = args.instability_base_weight + (
+                args.instability_max_weight - args.instability_base_weight
+            ) * level
+            reliab_ce_weight = ramp_fraction * adaptive_weight
+            if batch_idx % 50 == 0:
+                print(
+                    f"[instability] ep={ep} agree={agreement:.3f} conf={confidence_mean:.4f} "
+                    f"score={smoothed:.4f} weight={reliab_ce_weight:.4f}"
+                )
         pats_indices = target_contrastive_stats.get('selected_indices')
         if args.m1_scope == 'all':
             pats_indices = torch.arange(F1_pseudo_label_t.numel(), device=F1_pseudo_label_t.device)
