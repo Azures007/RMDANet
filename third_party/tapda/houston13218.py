@@ -68,6 +68,11 @@ HOUSTON_DATA_PATHS = {
 SEEDS = [1599, 1364, 1379, 1672, 1304, 1461, 1718, 1603, 1779, 1358]
 
 
+from modules.sb_theory import TheoryBudget
+
+_SB_THEORY = {'state': None}
+
+
 def build_parser():
     """构建命令行参数；这里只保留当前训练/评估/日志路径实际读取的配置。"""
     parser = argparse.ArgumentParser(description='Houston13 -> Houston18 DCL/BNM training')
@@ -317,6 +322,12 @@ def build_parser():
                             help='temperature used to recalibrate teacher confidence before gating (M3-T, 0 disables)')
     ours_group.add_argument('--m1_margin_gate', default=0.0, type=float,
                             help='minimum teacher top1-top2 margin for a sample to enter M1 (M3-M, 0 disables)')
+    ours_group.add_argument('--sb_theory', action='store_true', default=False,
+                            help='theory-driven per-class budget (bias-variance style score)')
+    ours_group.add_argument('--sb_theory_start_epoch', default=15, type=int,
+                            help='epoch from which the theory budget is applied')
+    ours_group.add_argument('--sb_theory_ema', default=0.9, type=float,
+                            help='EMA of the per-class statistics')
     return parser
 
 
@@ -771,6 +782,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if theory_factor is not None:
+                    sel_weight = sel_weight * theory_factor[confident]
                 if args.m1_class_cap > 0 and sel_idx.numel() > 0:
                     keep = torch.zeros_like(sel_labels, dtype=torch.bool)
                     for class_id in sel_labels.unique().tolist():
@@ -792,6 +805,18 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         order = sel_probs[class_mask].argsort(descending=True)
                         keep[class_mask[order[:quota]]] = True
                     sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
+                if (args.sb_theory and ep >= args.sb_theory_start_epoch
+                        and _SB_THEORY['state'] is not None):
+                    with torch.no_grad():
+                        theory_budget = _SB_THEORY['state'].update(
+                            F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t,
+                            target1, output_s1,
+                        )
+                    theory_factor = (
+                        theory_budget[pats_labels] if theory_budget is not None else None
+                    )
+                else:
+                    theory_factor = None
                 if args.m1_maturity_gate and sel_weight.numel() > 0:
                     maturity = float(sel_probs.mean().item())
                     span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
@@ -1114,6 +1139,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
+    _SB_THEORY['state'] = (
+        TheoryBudget(num_classes, 152, args.sb_theory_ema, DEV)
+        if getattr(args, 'sb_theory', False) else None
+    )
     prat_full = None
     if getattr(args, 'prat_full_mode', 'off') != 'off':
         prat_full = PhaseReliabilityResidualAmplitudeTransfer(
