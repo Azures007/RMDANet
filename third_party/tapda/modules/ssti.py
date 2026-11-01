@@ -7,6 +7,15 @@ import torch
 import torch.nn.functional as F
 
 
+def _split_logits(output):
+    """Models in this codebase return either a tensor or a (logits, features) tuple."""
+    if isinstance(output, (tuple, list)):
+        output = output[0]
+    if output.dim() == 1:
+        output = output.unsqueeze(0)
+    return output
+
+
 def build_transition_prior(label_map, num_classes, smoothing=0.1):
     label_map = np.asarray(label_map).astype(np.int64)
     height, width = label_map.shape
@@ -32,7 +41,7 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
             if index >= max_batches:
                 break
             features, _ = G(data.to(device))
-            logits = F1(features)[0]
+            logits = _split_logits(F1(features))
             np.add.at(
                 confusion,
                 (target.cpu().numpy(), logits.argmax(dim=1).cpu().numpy()),
@@ -41,26 +50,41 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
     return confusion
 
 
-def build_context(source_label_map, target_label_map, G, F1, source_loader,
-                  num_classes, device, prior_strength=1.0, smoothing=0.1):
+def build_context(source_label_map, target_label_map, num_classes, device,
+                  source_loader=None, G=None, F1=None, smoothing=0.1):
     transition = build_transition_prior(source_label_map, num_classes, smoothing)
-    confusion = source_confusion(G, F1, source_loader, num_classes, device)
-    row_sum = confusion.sum(axis=1, keepdims=True)
-    row_sum[row_sum == 0] = 1.0
-    conditional = confusion / row_sum
     source_map = np.asarray(source_label_map).astype(np.int64)
-    histogram = np.array([(source_map == c).sum() for c in range(1, num_classes + 1)], dtype=np.float64)
+    histogram = np.array(
+        [(source_map == c).sum() for c in range(1, num_classes + 1)], dtype=np.float64
+    )
     source_prior = (histogram + 1.0) / (histogram.sum() + num_classes)
     coords = np.nonzero(np.asarray(target_label_map) > 0)
     return {
         "transition": torch.from_numpy(transition).float().to(device),
-        "confusion": torch.from_numpy(conditional).float(),
+        "confusion": None,
         "source_prior": torch.from_numpy(source_prior).float(),
         "coords": coords,
         "shape": np.asarray(target_label_map).shape,
         "num_classes": num_classes,
-        "prior_strength": float(prior_strength),
+        "source_loader": source_loader,
+        "G": G,
+        "F1": F1,
+        "device": device,
     }
+
+
+def ensure_ready(context):
+    """Compute the source confusion matrix lazily, i.e. after the model is trained."""
+    if context["confusion"] is not None:
+        return context
+    confusion = source_confusion(
+        context["G"], context["F1"], context["source_loader"],
+        context["num_classes"], context["device"],
+    )
+    row_sum = confusion.sum(axis=1, keepdims=True)
+    row_sum[row_sum == 0] = 1.0
+    context["confusion"] = torch.from_numpy(confusion / row_sum).float()
+    return context
 
 
 def target_prior_bias(context, target_predictions):
@@ -80,12 +104,13 @@ def target_prior_bias(context, target_predictions):
     source_prior = context["source_prior"].cpu().numpy()
     bias = np.log(estimated / np.clip(source_prior, 1e-8, None))
     bias = bias - bias.mean()
-    return torch.from_numpy(bias).float().to(context["transition"].device)
+    return torch.from_numpy(bias).float().to(context["device"])
 
 
 def refine_labels(logits, context, labels, alpha=0.3, beta=0.5, iterations=3,
                   temperature=1.0, device=None):
-    device = device if device is not None else context["transition"].device
+    context = ensure_ready(context)
+    device = device if device is not None else context["device"]
     num_classes = context["num_classes"]
     rows, cols = context["coords"]
     height, width = context["shape"]

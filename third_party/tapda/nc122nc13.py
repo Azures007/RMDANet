@@ -813,8 +813,8 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         source_label_map = utils.load_data_YRD(data_path_s, label_path_s)[1]
         target_label_map = utils.load_data_YRD(data_path_t, label_path_t)[1]
         ssti_context = build_context(
-            source_label_map, target_label_map, G, F1, train_loader,
-            num_classes, DEV,
+            source_label_map, target_label_map, num_classes, DEV,
+            source_loader=train_loader, G=G, F1=F1,
         )
 
     epoch_train_start = time.time()
