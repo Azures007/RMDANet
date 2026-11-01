@@ -241,6 +241,8 @@ def build_parser():
                             help='blend ratio between the teacher probability and its neighbourhood mean')
     ours_group.add_argument('--m1_spatial_map_decay', default=0.9, type=float,
                             help='EMA decay of the running target probability map')
+    ours_group.add_argument('--m1_spatial_start_epoch', default=0, type=int,
+                            help='epoch from which the spatial consistency loss is applied')
     return parser
 
 
@@ -502,7 +504,7 @@ def initialize_models_and_optimizers(n_bands, patch_size, num_classes, device, a
 def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 contrastive_loss_func, optimizer_g, optimizer_f,
                 batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-                source_prototype_state, target_coords=None, spatial_map=None):
+                source_prototype_state, target_coords=None, spatial_map=None, spatial_count=None):
     iter_source, iter_target = iter(train_loader), iter(train_tar_loader)
     criterion = nn.CrossEntropyLoss().to(DEV)
     G.train()
@@ -774,7 +776,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 all_loss = all_loss + reliab_ce_weight * rel_ce
 
         if (args.m1_spatial_weight > 0 and spatial_map is not None
-                and target_coords is not None and sel_idx is not None and sel_idx.numel() > 0):
+                and target_coords is not None and sel_idx is not None and sel_idx.numel() > 0
+                and ep >= args.m1_spatial_start_epoch):
             height, width = int(spatial_map.shape[1]), int(spatial_map.shape[2])
             with torch.no_grad():
                 teacher_logits_sp, _ = F1_teacher.f(teacher_feat_t)
@@ -788,13 +791,22 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     args.m1_spatial_map_decay * previous
                     + (1.0 - args.m1_spatial_map_decay) * teacher_prob_sp.t()
                 )
-                neighbour_probs = []
+                count_flat = spatial_count.view(1, height * width)
+                flat_count = count_flat[0, flat_index]
+                count_flat[0, flat_index] = flat_count + 1.0
+                neighbour_sum = torch.zeros_like(teacher_prob_sp.t())
+                neighbour_cnt = torch.zeros_like(flat_count)
                 for d_row, d_col in ((-1, 0), (1, 0), (0, -1), (0, 1),
                                      (-1, -1), (-1, 1), (1, -1), (1, 1)):
                     neighbour_rows = (sample_rows + d_row).clamp(0, height - 1)
                     neighbour_cols = (sample_cols + d_col).clamp(0, width - 1)
-                    neighbour_probs.append(map_flat[:, neighbour_rows * width + neighbour_cols])
-                neighbour_mean = torch.stack(neighbour_probs, dim=0).mean(dim=0).t()
+                    neighbour_flat = neighbour_rows * width + neighbour_cols
+                    neighbour_sum = neighbour_sum + map_flat[:, neighbour_flat]
+                    neighbour_cnt = neighbour_cnt + count_flat[0, neighbour_flat]
+                safe_cnt = neighbour_cnt.clamp_min(1e-6).unsqueeze(0)
+                neighbour_mean = (neighbour_sum / safe_cnt).t()
+                empty_mask = (neighbour_cnt <= 0).unsqueeze(1)
+                neighbour_mean = torch.where(empty_mask, teacher_prob_sp, neighbour_mean)
             soft_target = (
                 (1.0 - args.m1_spatial_alpha) * teacher_prob_sp
                 + args.m1_spatial_alpha * neighbour_mean
@@ -1015,10 +1027,12 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
     spatial_map = None
+    spatial_count = None
     target_coords = None
     if getattr(args, 'm1_spatial_weight', 0.0) > 0:
         height, width = data['targetHW']
         spatial_map = torch.zeros(num_classes, height, width, device=DEV)
+        spatial_count = torch.zeros(1, height, width, device=DEV)
         target_coords = torch.tensor(data['targetCoords'], device=DEV)
 
     epoch_train_start = time.time()
@@ -1029,7 +1043,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             contrastive_loss_func, optimizer_g, optimizer_f,
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
-            source_prototype_state, target_coords, spatial_map,
+            source_prototype_state, target_coords, spatial_map, spatial_count,
         )
         if ep % num_epoch == 0:
             epoch_test_start = time.time()
