@@ -878,7 +878,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     with torch.no_grad():
                         transferability = _TAS_STATE['state'].update_and_transferability(
                             teacher_feat_s, target1, teacher_feat_t,
-                            pats_labels, pats_probs, output_s1,
+                            F1_pseudo_label_t, F1_pseudo_prob_t, output_s1,
                         )
                     if transferability is not None:
                         per_class_threshold = pats_probs.new_tensor(args.reliab_ce_min_prob) * (
