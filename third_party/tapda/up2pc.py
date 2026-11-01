@@ -359,6 +359,10 @@ def build_parser():
                             help='weight of the EMA teacher logits in the evaluation ensemble')
     eval_group.add_argument('--eval_bn_adapt', action='store_true', default=False,
                             help='re-estimate batch-norm statistics on the target test data before evaluation')
+    ours_group.add_argument('--ssti_coarse_weight', default=0.0, type=float,
+                            help='weight of the hierarchical coarse-field guidance (0 disables)')
+    ours_group.add_argument('--ssti_cell', default=3, type=int,
+                            help='cell size of the coarse field')
     return parser
 
 
@@ -1182,6 +1186,7 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                 alpha=args.ssti_alpha, beta=args.ssti_beta,
                 iterations=args.ssti_iters, temperature=args.ssti_temperature,
                 confidence_threshold=args.ssti_conf_threshold,
+                coarse_weight=args.ssti_coarse_weight, cell=args.ssti_cell,
             )
             predict_ensemble = refined
             acc_ensemble = 100. * float((refined == labels).sum()) / float(len_tar_dataset)

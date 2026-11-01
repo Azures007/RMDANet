@@ -111,14 +111,40 @@ def target_prior_bias(context, target_predictions):
     return torch.from_numpy(bias).float().to(context["device"])
 
 
+def coarse_field(probabilities, rows, cols, shape, cell, num_classes, device):
+    height, width = shape
+    coarse_h = (height + cell - 1) // cell
+    coarse_w = (width + cell - 1) // cell
+    field = torch.zeros((coarse_h, coarse_w, num_classes), device=device)
+    index = (rows // cell) * coarse_w + (cols // cell)
+    flat = field.view(-1, num_classes)
+    flat.index_add_(0, torch.from_numpy(index).to(device), probabilities)
+    return field, coarse_h, coarse_w
+
+
 def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
-                  temperature=1.0, confidence_threshold=0.95, device=None):
+                  temperature=1.0, confidence_threshold=0.95, coarse_weight=0.0,
+                  cell=3, device=None):
     context = ensure_ready(context)
     device = device if device is not None else context["device"]
     num_classes = context["num_classes"]
     rows, cols = context["coords"]
     height, width = context["shape"]
     log_probability = F.log_softmax(logits.to(device) / float(temperature), dim=1)
+    coarse_guidance = None
+    if coarse_weight > 0:
+        with torch.no_grad():
+            fine_probability = log_probability.exp()
+            field, coarse_h, coarse_w = coarse_field(
+                fine_probability, rows, cols, context['shape'], int(cell), num_classes, device
+            )
+            field = field.view(-1, num_classes)
+            field = field / field.sum(dim=1, keepdim=True).clamp_min(1e-8)
+            coarse_labels = field.argmax(dim=1)
+            coarse_log = torch.log(field.clamp_min(1e-8))
+            index = (torch.from_numpy(rows // int(cell)) * coarse_w
+                     + torch.from_numpy(cols // int(cell))).to(device)
+            coarse_guidance = coarse_log[index]
 
     initial = log_probability.argmax(dim=1).cpu().numpy()
     if len(initial) != len(rows):
@@ -154,6 +180,8 @@ def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
                 continue
             neighbour_score[valid_index] += log_transition[:, neighbour_labels].t()
         score = log_probability + alpha * bias.unsqueeze(0) + beta * neighbour_score
+        if coarse_guidance is not None:
+            score = score + coarse_weight * coarse_guidance
         refined = score.argmax(dim=1).cpu().numpy()
         # Only the uncertain pixels may change; confident predictions are frozen.
         refined = np.where(editable, refined, initial)
