@@ -68,6 +68,11 @@ PAVIA_DATA_PATHS = {
 SEEDS = [1726, 1040, 1885, 1083, 1937, 1921, 1270, 1343, 1914, 1077]
 
 
+from modules.conformal import SourceConformal
+
+_CONFORMAL = {'state': None}
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description='UP -> PC PDCL training')
 
@@ -308,6 +313,12 @@ def build_parser():
                             help='temperature used to recalibrate teacher confidence before gating (M3-T, 0 disables)')
     ours_group.add_argument('--m1_margin_gate', default=0.0, type=float,
                             help='minimum teacher top1-top2 margin for a sample to enter M1 (M3-M, 0 disables)')
+    ours_group.add_argument('--conformal', action='store_true', default=False,
+                            help='source-calibrated conformal threshold for the M1 gate')
+    ours_group.add_argument('--conformal_epsilon', default=0.05, type=float,
+                            help='target error rate of the retained subset on the source domain')
+    ours_group.add_argument('--conformal_default', default=0.95, type=float,
+                            help='fallback threshold before the calibration is reliable')
     return parser
 
 
@@ -786,6 +797,15 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         order = sel_probs[class_mask].argsort(descending=True)
                         keep[class_mask[order[:quota]]] = True
                     sel_idx, sel_labels, sel_weight = sel_idx[keep], sel_labels[keep], sel_weight[keep]
+                if args.conformal and _CONFORMAL['state'] is not None:
+                    with torch.no_grad():
+                        source_confidence = output_s1.detach().float().softmax(dim=1).max(dim=1).values
+                        source_correct = (
+                            output_s1.detach().argmax(dim=1).eq(target1.long()).float()
+                        )
+                        _CONFORMAL['state'].update(source_confidence, source_correct)
+                        conformal_threshold = _CONFORMAL['state'].threshold(args.conformal_epsilon)
+                    confident = pats_probs >= conformal_threshold
                 if args.m1_maturity_gate and sel_weight.numel() > 0:
                     maturity = float(sel_probs.mean().item())
                     span = max(args.m1_maturity_high - args.m1_maturity_low, 1e-6)
@@ -1104,6 +1124,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
+    _CONFORMAL['state'] = (
+        SourceConformal(default_threshold=args.conformal_default, device=DEV)
+        if getattr(args, 'conformal', False) else None
+    )
     prat_full = None
     if getattr(args, 'prat_full_mode', 'off') != 'off':
         prat_full = PhaseReliabilityResidualAmplitudeTransfer(
