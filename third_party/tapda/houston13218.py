@@ -71,6 +71,9 @@ SEEDS = [1599, 1364, 1379, 1672, 1304, 1461, 1718, 1603, 1779, 1358]
 _INSTABILITY_EMA = {'value': None}
 
 
+_CALIBRATION = {'temperature': 1.0}
+
+
 def build_parser():
     """构建命令行参数；这里只保留当前训练/评估/日志路径实际读取的配置。"""
     parser = argparse.ArgumentParser(description='Houston13 -> Houston18 DCL/BNM training')
@@ -342,6 +345,8 @@ def build_parser():
                             help='exponent applied to the prior ratio in D2')
     ours_group.add_argument('--m1_diag', action='store_true', default=False,
                             help='print unlabeled diagnostics used by the adaptive operator selection')
+    ours_group.add_argument('--src_calibration', action='store_true', default=False,
+                            help='calibrate the teacher temperature on the labelled source domain before gating')
     ours_group.add_argument('--instability_adaptive', action='store_true', default=False,
                             help='adapt the RGS weight from an early training-instability score (innovation 4)')
     ours_group.add_argument('--instability_threshold', default=0.10, type=float,
@@ -822,6 +827,25 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         ) / 3.0
                         prob_cons = prob_cons[pats_indices]
                         pats_probs, pats_labels = prob_cons.max(dim=1)
+                if args.src_calibration:
+                    with torch.no_grad():
+                        source_logits_cal = output_s1.detach().float()
+                        source_labels_cal = target1.long()
+                        best_temperature, best_nll = 1.0, None
+                        for candidate_temperature in (0.5, 0.7, 0.9, 1.0, 1.2, 1.5, 1.8, 2.2, 2.6, 3.0):
+                            candidate_nll = F.cross_entropy(
+                                source_logits_cal / candidate_temperature, source_labels_cal
+                            ).item()
+                            if best_nll is None or candidate_nll < best_nll:
+                                best_temperature, best_nll = candidate_temperature, candidate_nll
+                        _CALIBRATION['temperature'] = (
+                            0.9 * _CALIBRATION['temperature'] + 0.1 * best_temperature
+                        )
+                        teacher_logits_cal, _ = F1_teacher.f(teacher_feat_t)
+                        teacher_prob_cal = torch.softmax(
+                            teacher_logits_cal.detach().float() / _CALIBRATION['temperature'], dim=1
+                        )[pats_indices]
+                        pats_probs, pats_labels = teacher_prob_cal.max(dim=1)
                 if args.m1_class_adaptive > 0 and pats_labels.numel() > 0:
                     prior_counts = torch.bincount(
                         F1_pseudo_label_t.detach().long(), minlength=num_classes
