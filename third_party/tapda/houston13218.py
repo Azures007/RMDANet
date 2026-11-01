@@ -78,6 +78,11 @@ _CALIBRATION = {'temperature': 1.0}
 _REFERENCE_TEACHER = {'ref': None}
 
 
+from modules.tas import TASState
+
+_TAS_STATE = {'state': None}
+
+
 def build_parser():
     """构建命令行参数；这里只保留当前训练/评估/日志路径实际读取的配置。"""
     parser = argparse.ArgumentParser(description='Houston13 -> Houston18 DCL/BNM training')
@@ -365,6 +370,14 @@ def build_parser():
                             help='pseudo-label confidence threshold during adaptation')
     ours_group.add_argument('--sfda_im_weight', default=0.10, type=float,
                             help='weight of the information maximisation term')
+    ours_group.add_argument('--tas_enable', action='store_true', default=False,
+                            help='transferability-aware supervision: per-class threshold and weight from source statistics')
+    ours_group.add_argument('--tas_start_epoch', default=15, type=int,
+                            help='epoch from which TAS is applied')
+    ours_group.add_argument('--tas_threshold_scale', default=0.10, type=float,
+                            help='per-class threshold adjustment strength')
+    ours_group.add_argument('--tas_weight_floor', default=0.5, type=float,
+                            help='minimum per-class supervision weight')
     ours_group.add_argument('--crt_enable', action='store_true', default=False,
                             help='counterfactual reference teacher: gate supervision by drift from a lagged teacher')
     ours_group.add_argument('--crt_ref_alpha', default=0.995, type=float,
@@ -820,6 +833,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         pats_indices = target_contrastive_stats.get('selected_indices')
         if memory_batch is not None:
             pats_indices = memory_batch.stable_mask.nonzero(as_tuple=True)[0]
+        tas_confident = None
+        tas_weight = None
         if ((reliab_ce_weight > 0 or proto_anchor_weight > 0)
                 and pats_indices is not None and pats_indices.numel() > 0):
             with torch.no_grad():
@@ -859,6 +874,20 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         ) / 3.0
                         prob_cons = prob_cons[pats_indices]
                         pats_probs, pats_labels = prob_cons.max(dim=1)
+                if args.tas_enable and ep >= args.tas_start_epoch and _TAS_STATE['state'] is not None:
+                    with torch.no_grad():
+                        transferability = _TAS_STATE['state'].update_and_transferability(
+                            teacher_feat_s, target1, teacher_feat_t,
+                            pats_labels, pats_probs, output_s1,
+                        )
+                    if transferability is not None:
+                        per_class_threshold = pats_probs.new_tensor(args.reliab_ce_min_prob) * (
+                            1.05 - args.tas_threshold_scale * transferability[pats_labels]
+                        )
+                        tas_confident = pats_probs >= per_class_threshold
+                        tas_weight = args.tas_weight_floor + (
+                            1.0 - args.tas_weight_floor
+                        ) * transferability[pats_labels]
                 if args.src_calibration:
                     with torch.no_grad():
                         source_logits_cal = output_s1.detach().float()
@@ -950,11 +979,15 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 crt_factor = torch.exp(-args.crt_beta * excess)
             else:
                 crt_factor = None
+            if tas_confident is not None:
+                confident = confident & tas_confident
             if confident.any():
                 sel_idx = pats_indices[confident]
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
+                if tas_weight is not None:
+                    sel_weight = sel_weight * tas_weight[confident]
                 if crt_factor is not None:
                     sel_weight = sel_weight * crt_factor[confident]
                 if args.m1_agreement_strength > 0:
@@ -1321,6 +1354,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_g = models['optimizer_g']
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
+    _TAS_STATE['state'] = (
+        TASState(num_classes, 152, DEV)
+        if getattr(args, 'tas_enable', False) else None
+    )
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
     prat_full = None
     if getattr(args, 'prat_full_mode', 'off') != 'off':
