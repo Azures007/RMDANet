@@ -341,6 +341,18 @@ def build_parser():
                             help='RGS weight used for a stable run')
     ours_group.add_argument('--instability_max_weight', default=0.10, type=float,
                             help='RGS weight used for an unstable run')
+    ours_group.add_argument('--ssti', action='store_true', default=False,
+                            help='source-structured transductive inference at evaluation time')
+    ours_group.add_argument('--ssti_alpha', default=0.3, type=float,
+                            help='weight of the label-shift prior term in the ICM score')
+    ours_group.add_argument('--ssti_beta', default=0.5, type=float,
+                            help='weight of the spatial-transition term in the ICM score')
+    ours_group.add_argument('--ssti_iters', default=3, type=int,
+                            help='number of ICM iterations')
+    ours_group.add_argument('--ssti_temperature', default=1.0, type=float,
+                            help='temperature applied to the logits before the ICM')
+    ours_group.add_argument('--ssti_conf_threshold', default=0.95, type=float,
+                            help='only pixels below this confidence may be relabelled by the ICM')
     return parser
 
 
@@ -1096,7 +1108,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         print(format_target_diagnostic_summary(ep, target_diagnostic_state))
 
 
-def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed):
+from modules.ssti import refine_labels
+
+def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None):
     G.eval()
     F1.eval()
     F2.eval()
@@ -1109,6 +1123,7 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed):
     predict_f2 = np.array([], dtype=np.int64)
     predict_ensemble = np.array([], dtype=np.int64)
     outputdata = []
+    eval_logits_batches = []
 
     with torch.no_grad():
         for data, target in test_loader:
@@ -1120,6 +1135,7 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed):
             logits2 = F2(output)
             ensemble_logits = 0.5 * (logits1 + logits2)
             eval_logits = select_eval_logits(logits1, logits2, args.eval_mode)
+            eval_logits_batches.append(eval_logits.detach().cpu())
             test_loss += F.cross_entropy(eval_logits, target1.long(), reduction='sum').item()
 
             pred1 = logits1.data.max(1)[1]
@@ -1137,6 +1153,16 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed):
         acc1 = 100. * float(correct1) / float(len_tar_dataset)
         acc2 = 100. * float(correct2) / float(len_tar_dataset)
         acc_ensemble = 100. * float(correct_ensemble) / float(len_tar_dataset)
+        if ssti_context is not None and getattr(args, 'ssti', False):
+            logits_all = torch.cat(eval_logits_batches, 0)
+            refined = refine_labels(
+                logits_all, ssti_context, labels,
+                alpha=args.ssti_alpha, beta=args.ssti_beta,
+                iterations=args.ssti_iters, temperature=args.ssti_temperature,
+                confidence_threshold=args.ssti_conf_threshold,
+            )
+            predict_ensemble = refined
+            acc_ensemble = 100. * float((refined == labels).sum()) / float(len_tar_dataset)
         if args.eval_mode == 'f1':
             predict_eval = predict_f1
             acc_eval = acc1
@@ -1218,6 +1244,19 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     optimizer_f = models['optimizer_f']
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
+    ssti_context = None
+    if getattr(args, 'ssti', False):
+        from modules.ssti import build_context
+        source_label_map = utils.load_data_pavia(data_path_s, label_path_s)[1]
+        target_label_map = utils.load_data_pavia(data_path_t, label_path_t)[1]
+        permutation = np.asarray(data['RandPerm'], dtype=np.int64)
+        rows = np.asarray(data['Row'], dtype=np.int64)[permutation] - halfwidth
+        cols = np.asarray(data['Column'], dtype=np.int64)[permutation] - halfwidth
+        ssti_context = build_context(
+            source_label_map, target_label_map, num_classes, DEV,
+            source_loader=train_loader, G=G, F1=F1,
+            coords=(rows, cols),
+        )
     prat_full = None
     if getattr(args, 'prat_full_mode', 'off') != 'off':
         prat_full = PhaseReliabilityResidualAmplitudeTransfer(
@@ -1263,7 +1302,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         )
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
-            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed)
+            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context)
             epoch_test_end = time.time()
 
             if (not args.eval_every_epoch) or test_result['acc_eval'] > best_seed_acc:
