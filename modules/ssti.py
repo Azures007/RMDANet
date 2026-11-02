@@ -31,6 +31,7 @@ def predict_source_map(G, F1, source_image, halfwidth, num_classes, device,
     padded = np.pad(source_image, ((halfwidth, halfwidth), (halfwidth, halfwidth), (0, 0)),
                     mode="constant")
     label_map = np.zeros((height, width), dtype=np.int64)
+    confidence_map = np.zeros((height, width), dtype=np.float32)
     g_was_training, f_was_training = G.training, F1.training
     G.eval()
     F1.eval()
@@ -55,18 +56,27 @@ def predict_source_map(G, F1, source_image, halfwidth, num_classes, device,
                 output = F1(features)
                 if isinstance(output, (tuple, list)):
                     output = output[0]
+                probability = _torch.softmax(output.float(), dim=1) if not isinstance(output, (tuple, list)) else None
+                if probability is None:
+                    probability = _torch.softmax(output.float(), dim=1)
+                confidence = probability.max(dim=1).values.cpu().numpy().reshape(row_end - row_start, width)
                 prediction = output.argmax(dim=1).cpu().numpy().reshape(row_end - row_start, width)
                 label_map[row_start:row_end] = prediction
+                confidence_map[row_start:row_end] = confidence
     finally:
         G.train(g_was_training)
         F1.train(f_was_training)
-    return label_map
+    return label_map, confidence_map
 
 
-def build_transition_prior(label_map, num_classes, smoothing=0.1):
+def build_transition_prior(label_map, num_classes, smoothing=0.1, valid_mask=None):
     label_map = np.asarray(label_map).astype(np.int64)
     height, width = label_map.shape
     padded = np.pad(label_map, 1, mode="constant", constant_values=0)
+    if valid_mask is not None:
+        padded_mask = np.pad(np.asarray(valid_mask, dtype=np.uint8), 1, mode="constant")
+    else:
+        padded_mask = None
     counts = np.zeros((num_classes, num_classes), dtype=np.float64)
     for dr in (-1, 0, 1):
         for dc in (-1, 0, 1):
@@ -74,6 +84,9 @@ def build_transition_prior(label_map, num_classes, smoothing=0.1):
                 continue
             neighbour = padded[1 + dr:1 + dr + height, 1 + dc:1 + dc + width]
             valid = (label_map > 0) & (neighbour > 0)
+            if padded_mask is not None:
+                neighbour_mask = padded_mask[1 + dr:1 + dr + height, 1 + dc:1 + dc + width]
+                valid = valid & (padded_mask[1 + dr:1 + dr + height, 1 + dc:1 + dc + width] > 0)
             np.add.at(counts, (label_map[valid] - 1, neighbour[valid] - 1), 1.0)
     counts += smoothing
     return counts / counts.sum(axis=1, keepdims=True)
@@ -99,7 +112,7 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
 
 def build_context(source_label_map, target_label_map, num_classes, device,
                   source_loader=None, G=None, F1=None, smoothing=0.1, coords=None,
-                  structure="gt", source_image=None, halfwidth=0):
+                  structure="gt", source_image=None, halfwidth=0, pred_confidence=0.9):
     if structure == "predicted":
         if source_image is None:
             raise ValueError("structure='predicted' requires the source image")
@@ -130,6 +143,7 @@ def build_context(source_label_map, target_label_map, num_classes, device,
         "source_label_map": (None if structure == "predicted"
                              else np.asarray(source_label_map)),
         "smoothing": float(smoothing),
+        "pred_confidence": float(pred_confidence),
         "coords": coords,
         "shape": np.asarray(target_label_map).shape,
         "target_map": np.asarray(target_label_map).astype(np.int64),
@@ -146,17 +160,21 @@ def ensure_ready(context):
     if context["confusion"] is not None:
         return context
     if context.get("structure") == "predicted" and context["transition"] is None:
-        structural_map = predict_source_map(
+        structural_map, confidence_map = predict_source_map(
             context["G"], context["F1"], context["source_image"],
             context["halfwidth"], context["num_classes"], context["device"],
         )
+        mask = confidence_map >= context.get("pred_confidence", 0.9)
+        if int(mask.sum()) < 50:
+            mask = np.ones_like(mask, dtype=bool)
         transition = build_transition_prior(
-            structural_map, context["num_classes"], context["smoothing"]
+            structural_map, context["num_classes"], context["smoothing"],
+            valid_mask=mask,
         )
         context["transition"] = torch.from_numpy(transition).float().to(context["device"])
         source_map = np.asarray(structural_map).astype(np.int64)
         histogram = np.array(
-            [(source_map == c).sum() for c in range(1, context["num_classes"] + 1)],
+            [((source_map == c) & mask).sum() for c in range(1, context["num_classes"] + 1)],
             dtype=np.float64,
         )
         source_prior = (histogram + 1.0) / (histogram.sum() + context["num_classes"])

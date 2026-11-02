@@ -368,6 +368,8 @@ def build_parser():
                             help='weight of the EMA teacher logits in the evaluation ensemble')
     eval_group.add_argument('--eval_bn_adapt', action='store_true', default=False,
                             help='re-estimate batch-norm statistics on the target test data before evaluation')
+    ours_group.add_argument('--ssti_pred_conf', default=0.9, type=float,
+                            help='confidence threshold of the predicted source map used for the prior')
     ours_group.add_argument('--ssti_structure', default='predicted', choices=['predicted', 'gt'],
                             help="transition prior source: 'predicted' uses the source model (strict label budget), "
                                  "'gt' uses the full source ground truth (extra supervision)")
@@ -1295,6 +1297,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             structure=args.ssti_structure,
             source_image=source_image,
             halfwidth=halfwidth,
+            pred_confidence=args.ssti_pred_conf,
         )
     prat_full = None
     if getattr(args, 'prat_full_mode', 'off') != 'off':
