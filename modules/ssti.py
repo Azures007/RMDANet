@@ -16,6 +16,38 @@ def _split_logits(output):
     return output
 
 
+def source_only_copy(G, F1, source_loader, num_classes, device, epochs=20, lr=0.01):
+    """Deep-copy the encoder/classifier and retrain them on the source labels only.
+
+    This uses exactly the labelled source budget already spent by the running
+    experiment (e.g. 180 labels/class), so the predicted structure map is not
+    contaminated by the target-domain adaptation.
+    """
+    import copy as _copy
+    G_copy = _copy.deepcopy(G).to(device)
+    F1_copy = _copy.deepcopy(F1).to(device)
+    parameters = list(G_copy.parameters()) + list(F1_copy.parameters())
+    optimizer = torch.optim.SGD(parameters, lr=lr, momentum=0.9, weight_decay=5e-4)
+    criterion = torch.nn.CrossEntropyLoss()
+    G_copy.train()
+    F1_copy.train()
+    for _ in range(max(1, int(epochs))):
+        for data, target in source_loader:
+            data = data.to(device)
+            target = target.to(device).long()
+            features, _ = G_copy(data)
+            output = F1_copy(features)
+            if isinstance(output, (tuple, list)):
+                output = output[0]
+            loss = criterion(output, target)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+    G_copy.eval()
+    F1_copy.eval()
+    return G_copy, F1_copy
+
+
 def predict_source_map(G, F1, source_image, halfwidth, num_classes, device,
                        max_rows_per_batch=1):
     """Predict every pixel of the source image with the trained source model.
@@ -112,7 +144,8 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
 
 def build_context(source_label_map, target_label_map, num_classes, device,
                   source_loader=None, G=None, F1=None, smoothing=0.1, coords=None,
-                  structure="gt", source_image=None, halfwidth=0, pred_confidence=0.9):
+                  structure="gt", source_image=None, halfwidth=0, pred_confidence=0.9,
+                  source_only_epochs=20, source_only_lr=0.01):
     if structure == "predicted":
         if source_image is None:
             raise ValueError("structure='predicted' requires the source image")
@@ -144,6 +177,8 @@ def build_context(source_label_map, target_label_map, num_classes, device,
                              else np.asarray(source_label_map)),
         "smoothing": float(smoothing),
         "pred_confidence": float(pred_confidence),
+        "source_only_epochs": int(source_only_epochs),
+        "source_only_lr": float(source_only_lr),
         "coords": coords,
         "shape": np.asarray(target_label_map).shape,
         "target_map": np.asarray(target_label_map).astype(np.int64),
@@ -160,8 +195,14 @@ def ensure_ready(context):
     if context["confusion"] is not None:
         return context
     if context.get("structure") == "predicted" and context["transition"] is None:
+        G_structure, F1_structure = source_only_copy(
+            context["G"], context["F1"], context["source_loader"],
+            context["num_classes"], context["device"],
+            epochs=context.get("source_only_epochs", 20),
+            lr=context.get("source_only_lr", 0.01),
+        )
         structural_map, confidence_map = predict_source_map(
-            context["G"], context["F1"], context["source_image"],
+            G_structure, F1_structure, context["source_image"],
             context["halfwidth"], context["num_classes"], context["device"],
         )
         mask = confidence_map >= context.get("pred_confidence", 0.9)
@@ -172,13 +213,11 @@ def ensure_ready(context):
             valid_mask=mask,
         )
         context["transition"] = torch.from_numpy(transition).float().to(context["device"])
-        source_map = np.asarray(structural_map).astype(np.int64)
-        histogram = np.array(
-            [((source_map == c) & mask).sum() for c in range(1, context["num_classes"] + 1)],
-            dtype=np.float64,
+        # The labelled source budget is uniform (e.g. 180 labels/class), so the
+        # source class prior is taken as uniform instead of a GT histogram.
+        context["source_prior"] = torch.full(
+            (context["num_classes"],), 1.0 / context["num_classes"]
         )
-        source_prior = (histogram + 1.0) / (histogram.sum() + context["num_classes"])
-        context["source_prior"] = torch.from_numpy(source_prior).float()
     confusion = source_confusion(
         context["G"], context["F1"], context["source_loader"],
         context["num_classes"], context["device"],

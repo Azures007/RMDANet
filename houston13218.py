@@ -368,6 +368,10 @@ def build_parser():
                             help='weight of the EMA teacher logits in the evaluation ensemble')
     eval_group.add_argument('--eval_bn_adapt', action='store_true', default=False,
                             help='re-estimate batch-norm statistics on the target test data before evaluation')
+    ours_group.add_argument('--ssti_src_epochs', default=20, type=int,
+                            help='epochs of the source-only retraining used for the strict structure map')
+    ours_group.add_argument('--ssti_src_lr', default=0.01, type=float,
+                            help='learning rate of the source-only retraining')
     ours_group.add_argument('--ssti_pred_conf', default=0.9, type=float,
                             help='confidence threshold of the predicted source map used for the prior')
     ours_group.add_argument('--ssti_structure', default='predicted', choices=['predicted', 'gt'],
@@ -1298,6 +1302,8 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             source_image=source_image,
             halfwidth=halfwidth,
             pred_confidence=args.ssti_pred_conf,
+            source_only_epochs=args.ssti_src_epochs,
+            source_only_lr=args.ssti_src_lr,
         )
     prat_full = None
     if getattr(args, 'prat_full_mode', 'off') != 'off':
