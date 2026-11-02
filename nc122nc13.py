@@ -272,6 +272,9 @@ def build_parser():
                             help='weight of the EMA teacher logits in the evaluation ensemble')
     eval_group.add_argument('--eval_bn_adapt', action='store_true', default=False,
                             help='re-estimate batch-norm statistics on the target test data before evaluation')
+    ours_group.add_argument('--ssti_structure', default='predicted', choices=['predicted', 'gt'],
+                            help="transition prior source: 'predicted' uses the source model (strict label budget), "
+                                 "'gt' uses the full source ground truth (extra supervision)")
     return parser
 
 
@@ -1111,6 +1114,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     ssti_context = None
     if getattr(args, 'ssti', False):
         from modules.ssti import build_context
+        source_image = utils.load_data_YRD(data_path_s, label_path_s)[0]
         source_label_map = utils.load_data_YRD(data_path_s, label_path_s)[1]
         target_label_map = utils.load_data_YRD(data_path_t, label_path_t)[1]
         permutation = np.asarray(data['RandPerm'], dtype=np.int64)
@@ -1120,6 +1124,9 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             source_label_map, target_label_map, num_classes, DEV,
             source_loader=train_loader, G=G, F1=F1,
             coords=(rows, cols),
+            structure=args.ssti_structure,
+            source_image=source_image,
+            halfwidth=halfwidth,
         )
     spatial_map = None
     spatial_count = None

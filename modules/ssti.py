@@ -16,6 +16,53 @@ def _split_logits(output):
     return output
 
 
+def predict_source_map(G, F1, source_image, halfwidth, num_classes, device,
+                       max_rows_per_batch=1):
+    """Predict every pixel of the source image with the trained source model.
+
+    Only the source image (no labels) and the trained model are used, so this is
+    compatible with the limited-label protocol (e.g. 180 labels/class).
+    """
+    import torch as _torch
+
+    source_image = np.asarray(source_image, dtype=np.float32)
+    height, width, _ = source_image.shape
+    patch_size = 2 * int(halfwidth) + 1
+    padded = np.pad(source_image, ((halfwidth, halfwidth), (halfwidth, halfwidth), (0, 0)),
+                    mode="constant")
+    label_map = np.zeros((height, width), dtype=np.int64)
+    g_was_training, f_was_training = G.training, F1.training
+    G.eval()
+    F1.eval()
+    rows_per_batch = max(1, min(int(max_rows_per_batch), max(1, 512 // max(1, width))))
+    try:
+        with _torch.no_grad():
+            for row_start in range(0, height, rows_per_batch):
+                row_end = min(row_start + rows_per_batch, height)
+                patches = []
+                for row in range(row_start, row_end):
+                    block = padded[row:row + patch_size, :, :]
+                    windows = np.lib.stride_tricks.sliding_window_view(
+                        block, (patch_size, patch_size), axis=(0, 1)
+                    )
+                    row_patches = np.transpose(windows, (1, 3, 4, 0, 2)).reshape(
+                        width, patch_size, patch_size, source_image.shape[2]
+                    )
+                    patches.append(row_patches)
+                batch = np.concatenate(patches, axis=0)
+                tensor = _torch.from_numpy(batch).float().permute(0, 3, 1, 2).to(device)
+                features, _ = G(tensor)
+                output = F1(features)
+                if isinstance(output, (tuple, list)):
+                    output = output[0]
+                prediction = output.argmax(dim=1).cpu().numpy().reshape(row_end - row_start, width)
+                label_map[row_start:row_end] = prediction
+    finally:
+        G.train(g_was_training)
+        F1.train(f_was_training)
+    return label_map
+
+
 def build_transition_prior(label_map, num_classes, smoothing=0.1):
     label_map = np.asarray(label_map).astype(np.int64)
     height, width = label_map.shape
@@ -51,21 +98,38 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
 
 
 def build_context(source_label_map, target_label_map, num_classes, device,
-                  source_loader=None, G=None, F1=None, smoothing=0.1, coords=None):
-    transition = build_transition_prior(source_label_map, num_classes, smoothing)
-    source_map = np.asarray(source_label_map).astype(np.int64)
-    histogram = np.array(
-        [(source_map == c).sum() for c in range(1, num_classes + 1)], dtype=np.float64
-    )
-    source_prior = (histogram + 1.0) / (histogram.sum() + num_classes)
+                  source_loader=None, G=None, F1=None, smoothing=0.1, coords=None,
+                  structure="gt", source_image=None, halfwidth=0):
+    if structure == "predicted":
+        if source_image is None:
+            raise ValueError("structure='predicted' requires the source image")
+    structural_map = None if structure == "predicted" else np.asarray(source_label_map)
+    transition = None
+    if structural_map is not None:
+        transition = build_transition_prior(structural_map, num_classes, smoothing)
+    source_prior = None
+    if structural_map is not None:
+        source_map = np.asarray(structural_map).astype(np.int64)
+        histogram = np.array(
+            [(source_map == c).sum() for c in range(1, num_classes + 1)], dtype=np.float64
+        )
+        source_prior = (histogram + 1.0) / (histogram.sum() + num_classes)
     if coords is None:
         coords = np.nonzero(np.asarray(target_label_map) > 0)
     else:
         coords = (np.asarray(coords[0], dtype=np.int64), np.asarray(coords[1], dtype=np.int64))
     return {
-        "transition": torch.from_numpy(transition).float().to(device),
+        "transition": (torch.from_numpy(transition).float().to(device)
+                       if transition is not None else None),
         "confusion": None,
-        "source_prior": torch.from_numpy(source_prior).float(),
+        "source_prior": (torch.from_numpy(source_prior).float()
+                         if source_prior is not None else None),
+        "structure": structure,
+        "source_image": source_image,
+        "halfwidth": int(halfwidth),
+        "source_label_map": (None if structure == "predicted"
+                             else np.asarray(source_label_map)),
+        "smoothing": float(smoothing),
         "coords": coords,
         "shape": np.asarray(target_label_map).shape,
         "target_map": np.asarray(target_label_map).astype(np.int64),
@@ -81,6 +145,22 @@ def ensure_ready(context):
     """Compute the source confusion matrix lazily, i.e. after the model is trained."""
     if context["confusion"] is not None:
         return context
+    if context.get("structure") == "predicted" and context["transition"] is None:
+        structural_map = predict_source_map(
+            context["G"], context["F1"], context["source_image"],
+            context["halfwidth"], context["num_classes"], context["device"],
+        )
+        transition = build_transition_prior(
+            structural_map, context["num_classes"], context["smoothing"]
+        )
+        context["transition"] = torch.from_numpy(transition).float().to(context["device"])
+        source_map = np.asarray(structural_map).astype(np.int64)
+        histogram = np.array(
+            [(source_map == c).sum() for c in range(1, context["num_classes"] + 1)],
+            dtype=np.float64,
+        )
+        source_prior = (histogram + 1.0) / (histogram.sum() + context["num_classes"])
+        context["source_prior"] = torch.from_numpy(source_prior).float()
     confusion = source_confusion(
         context["G"], context["F1"], context["source_loader"],
         context["num_classes"], context["device"],

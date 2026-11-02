@@ -45,6 +45,23 @@ SSTI parameters (defaults used in the paper, identical for all datasets)
   --ssti_beta 0.5         spatial transition weight
   --ssti_iters 3          ICM iterations
   --ssti_conf_threshold 0.95   only pixels below this confidence may change
+  --ssti_structure predicted   transition prior source (default, see protocol below)
+
+SSTI protocols (important for fair comparison)
+----------------------------------------------
+  --ssti_structure predicted  STRICT label budget (main experiments).
+      The class-transition prior T and the source class prior pi_s are estimated
+      from the SOURCE MODEL'S PREDICTIONS on the source image (dense sliding-window
+      inference). No source labels beyond the 180/class training budget are used.
+      The prediction map is computed lazily after training, at evaluation time.
+
+  --ssti_structure gt         FULL source structure (supplementary upper-bound).
+      T and pi_s are estimated from the complete source ground-truth map, which is
+      extra supervision beyond the 180/class budget. Report this separately and
+      never mix it with the strict-budget table.
+
+  Target labels are only used to locate the evaluation pixels (the standard
+  benchmark mask). They never enter the prior, the gate, or the ICM score.
 
 Data layout expected on the server
   datasets/Pavia/     paviaU.mat, paviaU_gt_7.mat, paviaC.mat, paviaC_gt_7.mat
