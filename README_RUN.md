@@ -49,16 +49,18 @@ SSTI parameters (defaults used in the paper, identical for all datasets)
 
 SSTI protocols (important for fair comparison)
 ----------------------------------------------
-  --ssti_structure predicted  STRICT label budget (main experiments).
-      The class-transition prior T and the source class prior pi_s are estimated
-      from the SOURCE MODEL'S PREDICTIONS on the source image (dense sliding-window
-      inference). No source labels beyond the 180/class training budget are used.
-      The prediction map is computed lazily after training, at evaluation time.
+  --ssti_structure potts      DEFAULT, FAIR protocol used for the main results.
+      The spatial prior is a label-free isotropic Potts model
+      T = 0.9 * I + 0.1 * (1 - I) / (C - 1); the source class prior is uniform.
+      No source labels or source statistics beyond the 180/class training budget
+      are used anywhere in SSTI.
 
-  --ssti_structure gt         FULL source structure (supplementary upper-bound).
+  --ssti_structure gt         FULL source structure (supplementary upper bound).
       T and pi_s are estimated from the complete source ground-truth map, which is
-      extra supervision beyond the 180/class budget. Report this separately and
-      never mix it with the strict-budget table.
+      extra supervision beyond the 180/class budget. Supplementary only.
+
+  --ssti_structure predicted  Intermediate variant: T estimated from a source-only
+      model's dense predictions. Kept for ablation; it did not improve accuracy.
 
   Target labels are only used to locate the evaluation pixels (the standard
   benchmark mask). They never enter the prior, the gate, or the ICM score.
