@@ -31,18 +31,20 @@ def source_only_copy(G, F1, source_loader, num_classes, device, epochs=20, lr=0.
     criterion = torch.nn.CrossEntropyLoss()
     G_copy.train()
     F1_copy.train()
-    for _ in range(max(1, int(epochs))):
-        for data, target in source_loader:
-            data = data.to(device)
-            target = target.to(device).long()
-            features, _ = G_copy(data)
-            output = F1_copy(features)
-            if isinstance(output, (tuple, list)):
-                output = output[0]
-            loss = criterion(output, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    # The caller runs inside torch.no_grad(); re-enable grad for this local training.
+    with torch.enable_grad():
+        for _ in range(max(1, int(epochs))):
+            for data, target in source_loader:
+                data = data.to(device)
+                target = target.to(device).long()
+                features, _ = G_copy(data)
+                output = F1_copy(features)
+                if isinstance(output, (tuple, list)):
+                    output = output[0]
+                loss = criterion(output, target)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
     G_copy.eval()
     F1_copy.eval()
     return G_copy, F1_copy
