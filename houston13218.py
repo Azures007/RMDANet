@@ -374,7 +374,7 @@ def build_parser():
                             help='learning rate of the source-only retraining')
     ours_group.add_argument('--ssti_pred_conf', default=0.9, type=float,
                             help='confidence threshold of the predicted source map used for the prior')
-    ours_group.add_argument('--ssti_structure', default='predicted', choices=['predicted', 'gt'],
+    ours_group.add_argument('--ssti_structure', default='predicted', choices=['predicted', 'gt', 'potts'],
                             help="transition prior source: 'predicted' uses the source model (strict label budget), "
                                  "'gt' uses the full source ground truth (extra supervision)")
     return parser

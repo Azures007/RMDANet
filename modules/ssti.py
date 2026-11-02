@@ -151,10 +151,20 @@ def build_context(source_label_map, target_label_map, num_classes, device,
     if structure == "predicted":
         if source_image is None:
             raise ValueError("structure='predicted' requires the source image")
-    structural_map = None if structure == "predicted" else np.asarray(source_label_map)
-    transition = None
-    if structural_map is not None:
-        transition = build_transition_prior(structural_map, num_classes, smoothing)
+    if structure == "potts":
+        # Label-free isotropic prior: no source statistics at all.
+        identity = np.eye(num_classes, dtype=np.float64)
+        off = (1.0 - identity) / max(1, num_classes - 1)
+        transition = (1.0 - 0.1) * identity + 0.1 * off
+        structural_map = None
+    elif structure == "predicted":
+        structural_map = None
+    else:
+        structural_map = np.asarray(source_label_map)
+    if structure != "potts":
+        transition = None
+        if structural_map is not None:
+            transition = build_transition_prior(structural_map, num_classes, smoothing)
     source_prior = None
     if structural_map is not None:
         source_map = np.asarray(structural_map).astype(np.int64)
