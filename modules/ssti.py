@@ -157,6 +157,7 @@ def build_context(source_label_map, target_label_map, num_classes, device,
         off = (1.0 - identity) / max(1, num_classes - 1)
         transition = (1.0 - 0.1) * identity + 0.1 * off
         structural_map = None
+        potts_prior = np.full(num_classes, 1.0 / num_classes)
     elif structure == "predicted":
         structural_map = None
     else:
@@ -165,7 +166,7 @@ def build_context(source_label_map, target_label_map, num_classes, device,
         transition = None
         if structural_map is not None:
             transition = build_transition_prior(structural_map, num_classes, smoothing)
-    source_prior = None
+    source_prior = potts_prior if structure == "potts" else None
     if structural_map is not None:
         source_map = np.asarray(structural_map).astype(np.int64)
         histogram = np.array(
