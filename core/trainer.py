@@ -311,6 +311,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--final_tta", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--skip_final_evaluation", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--ablation_id", type=str, default="full")
+    parser.add_argument("--ablate_prat", choices=["auto", "on", "off"], default="auto",
+                        help="RFTM (PRAT) ablation toggle; auto keeps the profile")
+    parser.add_argument("--ablate_drse", choices=["auto", "on", "off"], default="auto",
+                        help="DRSE (CenterGuidedPooling) ablation toggle")
+    parser.add_argument("--ablate_rtml", choices=["auto", "on", "off"], default="auto",
+                        help="RTML (cross-epoch reliability memory) ablation toggle")
     parser.add_argument("--run_name", type=str, default="")
     parser.add_argument("--diagnostic_target_oa", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument(
@@ -514,6 +520,24 @@ def apply_ablation_profile(args: argparse.Namespace) -> argparse.Namespace:
 
     if bool(getattr(args, "disable_prat_flag", False)):
         args.use_prat = False
+
+    # Explicit ablation toggles (used by the paper ablation table).
+    if getattr(args, "ablate_prat", "auto") == "off":
+        args.use_prat = False
+    elif getattr(args, "ablate_prat", "auto") == "on":
+        args.use_prat = True
+
+    if getattr(args, "ablate_drse", "auto") == "off":
+        args.pooling_mode = "gap"
+    elif getattr(args, "ablate_drse", "auto") == "on":
+        args.pooling_mode = "guided"
+
+    if getattr(args, "ablate_rtml", "auto") == "off":
+        args.pseudo_mode = "off"
+        args.use_probability_history = False
+    elif getattr(args, "ablate_rtml", "auto") == "on":
+        args.pseudo_mode = "history"
+        args.use_probability_history = True
 
     return args
 

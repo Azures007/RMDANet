@@ -28,6 +28,8 @@ def get_args(options):
     args.data_path = str(root if root.name.casefold() == directory.casefold() else root / directory)
     args.save_path = str(Path(options.out_root).expanduser().resolve() / options.dataset)
     args.run_name = f'{options.mode}_epochs{options.epochs or args.epochs}_seed{options.seed}'
+    if options.tag:
+        args.run_name = args.run_name + '_' + options.tag
     args.seed = options.seed
     args.gpu = options.gpu
     args.ssf_mode = options.mode
@@ -62,6 +64,11 @@ def get_args(options):
         args.dual_head_filter = True
         args.lambda_dual_source = options.dual_source_weight
     # Enforce only the training protocol; original v6 algorithms/configs stay unchanged.
+    if options.ablation_id is not None:
+        args.ablation_id = options.ablation_id
+    args.ablate_prat = options.ablate_prat
+    args.ablate_drse = options.ablate_drse
+    args.ablate_rtml = options.ablate_rtml
     args.use_gt_target_mask = False
     args.target_gt_mix_ratio = 0.0
     args.diagnostic_target_oa = False
@@ -94,6 +101,12 @@ def main():
     p.add_argument('--no-independent-target-reweight',action='store_true')
     p.add_argument('--dual-head-filter',action='store_true')
     p.add_argument('--dual-source-weight',type=float,default=0.10)
+    p.add_argument('--ablation-id',default=None,
+                   help='override ablation profile id (e.g. main_base, main_reliability)')
+    p.add_argument('--ablate-prat',choices=['auto','on','off'],default='auto')
+    p.add_argument('--ablate-drse',choices=['auto','on','off'],default='auto')
+    p.add_argument('--ablate-rtml',choices=['auto','on','off'],default='auto')
+    p.add_argument('--tag',default=None,help='suffix appended to the run name')
     p.add_argument('--dry-run',action='store_true')
     opt=p.parse_args()
     a=get_args(opt)
