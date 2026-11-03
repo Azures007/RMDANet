@@ -69,6 +69,17 @@ def get_args(options):
     args.ablate_prat = options.ablate_prat
     args.ablate_drse = options.ablate_drse
     args.ablate_rtml = options.ablate_rtml
+    if getattr(options, "clean_base", False):
+        # Ablation base: keep only the source-supervised encoder + EMA self-training,
+        # switch off every other mechanism that is not part of the three ablated modules.
+        args.lambda_cca = 0.0
+        args.lambda_coral = 0.0
+        args.lambda_lmmd = 0.0
+        args.prototype_weight = 0.0
+        args.prototype_align_flag = False
+        args.include_target_scale_mi = False
+        args.strict_class_balance_strength = 0.0
+        args.cempa_class_cap = 0
     args.use_gt_target_mask = False
     args.target_gt_mix_ratio = 0.0
     args.diagnostic_target_oa = False
@@ -103,6 +114,9 @@ def main():
     p.add_argument('--dual-source-weight',type=float,default=0.10)
     p.add_argument('--ablation-id',default=None)
     p.add_argument('--ablate-prat',choices=['auto','on','off'],default='auto')
+    p.add_argument('--clean-base',action='store_true',
+                   help='switch OFF every other mechanism (aligners, prototype alignment, '
+                        'scale-MI, class balance) before the RFTM/DRSE/RTML ablation')
     p.add_argument('--ablate-drse',choices=['auto','on','off'],default='auto')
     p.add_argument('--ablate-rtml',choices=['auto','on','off'],default='auto')
     p.add_argument('--tag',default=None)
