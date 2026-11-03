@@ -533,7 +533,9 @@ def apply_ablation_profile(args: argparse.Namespace) -> argparse.Namespace:
         args.pooling_mode = "guided"
 
     if getattr(args, "ablate_rtml", "auto") == "off":
-        args.pseudo_mode = "off"
+        # Keep self-training with CURRENT-epoch pseudo labels; only remove the
+        # cross-epoch reliability memory (that is what RTML adds).
+        args.pseudo_mode = "current"
         args.use_probability_history = False
     elif getattr(args, "ablate_rtml", "auto") == "on":
         args.pseudo_mode = "history"
