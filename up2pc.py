@@ -1131,7 +1131,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
-from modules.guard import Guard, guard_reset, guard_accumulate
+from modules.guard import (Guard, guard_reset, guard_accumulate,
+                           probe_source_acc, probe_target_preds)
 
 def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     if getattr(args, 'eval_bn_adapt', False) and teacher is None:
@@ -1354,7 +1355,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
             source_prototype_state, prat_full, memory,
         )
-        guard_info = guard.step(ep, {'G': G, 'F1': F1, 'F2': F2})
+        _src_acc = probe_source_acc(G, F1, train_loader, DEV)
+        _tar_preds = probe_target_preds(F1, train_tar_loader, DEV)
+        guard_info = guard.step(ep, {'G': G, 'F1': F1, 'F2': F2},
+                                source_acc=_src_acc, tar_preds=_tar_preds)
         if guard_info is not None:
             print(
                 f"[guard] rollback at ep={guard_info['epoch']} -> epoch {guard_info['restore']} "
