@@ -176,9 +176,23 @@ def load_data_hyrank(image_file, label_file):
     # print(image_data.keys()) #mine
     # print(label_data.keys())
 
-    data_all = image_data['ori_data']
+    def _first_array(payload):
+        for key, value in payload.items():
+            if key.startswith('__'):
+                continue
+            if hasattr(value, 'shape') and value.ndim >= 2:
+                return value
+        raise KeyError('no 2-D array found in mat file: ' + str(list(payload.keys())))
 
-    GroundTruth = label_data['map']
+    image_keys = [k for k in image_data if not k.startswith('__')]
+    label_keys = [k for k in label_data if not k.startswith('__')]
+    print('[hyrank] image keys:', image_keys, 'label keys:', label_keys)
+
+    data_all = image_data['ori_data'] if 'ori_data' in image_data else _first_array(image_data)
+    GroundTruth = label_data['map'] if 'map' in label_data else _first_array(label_data)
+    GroundTruth = np.asarray(GroundTruth)
+    print('[hyrank] cube', data_all.shape, 'bands', data_all.shape[-1],
+          'gt', GroundTruth.shape, 'label min/max', int(GroundTruth.min()), int(GroundTruth.max()))
 
     # Data_Band_Scaler = data_all
 
