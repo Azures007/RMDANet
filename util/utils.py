@@ -124,16 +124,18 @@ def get_all_data(All_data, All_label, HalfWidth):
 def seed_everything(seed, use_deterministic=False):
     random.seed(seed)
     np.random.seed(seed)
-    # os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
     torch.manual_seed(seed)
-    # torch.cuda.manual_seed(seed)
-    # torch.cuda.manual_seed_all(seed)
+    # CUDA RNG must be seeded too, otherwise dropout / CUDA-side sampling makes
+    # every run (and every seed inside a multi-seed loop) irreproducible.
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
     if use_deterministic:
         torch.use_deterministic_algorithms(True, warn_only=True)
     torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
     os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
 
 
 def cubeData(file_path):
