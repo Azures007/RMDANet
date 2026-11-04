@@ -365,6 +365,12 @@ def build_parser():
                             help='learning rate of the source-only retraining')
     ours_group.add_argument('--ssti_pred_conf', default=0.9, type=float,
                             help='confidence threshold of the predicted source map used for the prior')
+    ours_group.add_argument('--guard', action='store_true', default=False,
+                            help='guarded adaptation: monitor collapse signals and roll back interventions')
+    ours_group.add_argument('--guard_start_epoch', default=15, type=int,
+                            help='epoch from which the collapse monitor is active')
+    ours_group.add_argument('--guard_patience', default=2, type=int,
+                            help='consecutive bad epochs before rolling back')
     ours_group.add_argument('--ssti_structure', default='potts', choices=['potts', 'gt', 'predicted'],
                             help="transition prior source: 'predicted' uses the source model (strict label budget), "
                                  "'gt' uses the full source ground truth (extra supervision)")
@@ -680,6 +686,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         target1 = Variable(target1)
         F1_teacher.update_weights(G, F1, ep * num_iter + batch_idx)
         F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t, teacher_proj_t = F1_teacher(data2)
+        guard_accumulate(F1_pseudo_prob_t, F1_pseudo_label_t)
 
         _, _, teacher_feat_s, teacher_proj_s = F1_teacher(data1)
         _, student_proj_s = G(data1)
@@ -1124,6 +1131,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.guard import Guard, guard_reset, guard_accumulate
 
 def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     if getattr(args, 'eval_bn_adapt', False) and teacher is None:
@@ -1325,6 +1333,13 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     epoch_test_start = epoch_train_start
     epoch_test_end = epoch_train_start
     best_seed_acc = -1.0
+    guard = Guard(
+        num_classes, DEV,
+        start_epoch=getattr(args, 'guard_start_epoch', 15),
+        patience=getattr(args, 'guard_patience', 2),
+        enabled=bool(getattr(args, 'guard', False))
+        and float(getattr(args, 'reliab_ce_weight', 0.0)) > 0.0,
+    )
     for ep in range(1, num_epoch + 1):
         if args.lr_schedule == 'cosine':
             progress = (ep - 1) / max(1, num_epoch - 1)
@@ -1332,12 +1347,26 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             for optimizer in (optimizer_g, optimizer_f):
                 for group in optimizer.param_groups:
                     group['lr'] = lr_now
+        guard_reset(num_classes, DEV)
         train_epoch(
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             contrastive_loss_func, optimizer_g, optimizer_f,
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
             source_prototype_state, prat_full, memory,
         )
+        guard_info = guard.step(ep, {'G': G, 'F1': F1, 'F2': F2})
+        if guard_info is not None:
+            print(
+                f"[guard] rollback at ep={guard_info['epoch']} -> epoch {guard_info['restore']} "
+                f"reasons={guard_info['reasons']}"
+            )
+            Guard.load_state(guard.snapshots[-1][1], {'G': G, 'F1': F1, 'F2': F2})
+            args.reliab_ce_weight = 0.0
+            args.m1_maturity_gate = False
+            args.m1_consensus = False
+            args.m1_class_quota = 0
+            print("[guard] interventions disabled for the remaining epochs")
+
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
             test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
