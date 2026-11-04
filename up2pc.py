@@ -1360,8 +1360,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         guard_info = guard.step(ep, source_acc=_src_acc, tar_preds=_tar_preds)
         if guard_info is not None:
             print(
-                f"[guard] rollback at ep={guard_info['epoch']} -> epoch {guard_info['restore']} "
-                f"reasons={guard_info['reasons']}"
+                f"[guard] trigger at ep={guard_info['epoch']} reasons={guard_info['reasons']}"
             )
             args.reliab_ce_weight = 0.0
             args.m1_maturity_gate = False
