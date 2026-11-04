@@ -1367,7 +1367,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             source_prototype_state, prat_full, memory
         )
         _src_acc = probe_source_acc(G, F1, train_loader, DEV)
-        _tar_preds = probe_target_preds(F1, train_tar_loader, DEV)
+        _tar_preds = probe_target_preds(G, F1, train_tar_loader, DEV)
         guard_info = guard.step(ep, {'G': G, 'F1': F1, 'F2': F2},
                                 source_acc=_src_acc, tar_preds=_tar_preds)
         if guard_info is not None:

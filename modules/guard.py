@@ -82,7 +82,9 @@ def probe_source_acc(G, F1, src_loader, device, max_batches=10):
             break
         data = data.to(device)
         label = label.to(device)
-        out = F1(data)
+        feats = G(data)
+        feats = feats[0] if isinstance(feats, tuple) else feats
+        out = F1(feats)
         logits = out[0] if isinstance(out, tuple) else out
         pred = logits.argmax(dim=1)
         correct += int((pred == label).sum().item())
@@ -94,7 +96,7 @@ def probe_source_acc(G, F1, src_loader, device, max_batches=10):
 
 
 @torch.no_grad()
-def probe_target_preds(F1, tar_loader, device, max_batches=8):
+def probe_target_preds(G, F1, tar_loader, device, max_batches=8):
     """Predictions on a small target batch keyed by target id (order independent)."""
     was_training = F1.training
     F1.eval()
@@ -104,7 +106,9 @@ def probe_target_preds(F1, tar_loader, device, max_batches=8):
             break
         data, ids = batch[0], batch[2]
         data = data.to(device)
-        logits = F1(data)
+        feats = G(data)
+        feats = feats[0] if isinstance(feats, tuple) else feats
+        logits = F1(feats)
         if isinstance(logits, tuple):
             logits = logits[0]
         pred = logits.argmax(dim=1).cpu()
