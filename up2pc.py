@@ -1132,7 +1132,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 from modules.ssti import refine_labels
 from modules.guard import (Guard, guard_reset, guard_accumulate,
-                           probe_source_acc, probe_target_preds)
+                           build_probe_cache, probe_cached)
 
 def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     if getattr(args, 'eval_bn_adapt', False) and teacher is None:
@@ -1341,6 +1341,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         enabled=bool(getattr(args, 'guard', False))
         and float(getattr(args, 'reliab_ce_weight', 0.0)) > 0.0,
     )
+    guard_probe_cache = build_probe_cache(train_loader, train_tar_loader)
     for ep in range(1, num_epoch + 1):
         if args.lr_schedule == 'cosine':
             progress = (ep - 1) / max(1, num_epoch - 1)
@@ -1355,21 +1356,19 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
             source_prototype_state, prat_full, memory,
         )
-        _src_acc = probe_source_acc(G, F1, train_loader, DEV)
-        _tar_preds = probe_target_preds(G, F1, train_tar_loader, DEV)
-        guard_info = guard.step(ep, {'G': G, 'F1': F1, 'F2': F2},
-                                source_acc=_src_acc, tar_preds=_tar_preds)
+        _src_acc, _tar_preds = probe_cached(G, F1, guard_probe_cache, DEV)
+        guard_info = guard.step(ep, source_acc=_src_acc, tar_preds=_tar_preds)
         if guard_info is not None:
             print(
                 f"[guard] rollback at ep={guard_info['epoch']} -> epoch {guard_info['restore']} "
                 f"reasons={guard_info['reasons']}"
             )
-            Guard.load_state(guard.snapshots[-1][1], {'G': G, 'F1': F1, 'F2': F2})
             args.reliab_ce_weight = 0.0
             args.m1_maturity_gate = False
             args.m1_consensus = False
             args.m1_class_quota = 0
-            print("[guard] interventions disabled for the remaining epochs")
+            args.ssti = False
+            print("[guard] interventions + SSTI disabled for the remaining epochs")
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
