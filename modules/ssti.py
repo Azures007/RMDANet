@@ -309,4 +309,50 @@ def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
         refined = np.where(editable, refined, initial)
         grid[rows, cols] = refined
 
-    return np.asarray(grid[rows, cols], dtype=np.int64)
+    final = np.asarray(grid[rows, cols], dtype=np.int64)
+    initial = np.asarray(initial, dtype=np.int64)
+
+    # ------------------------------------------------------------------
+    # Safety check: reject a refinement that collapses the label
+    # distribution.  The Potts/ICM smoothing can otherwise flip a large
+    # fraction of pixels to a few classes and destroy an accurate model.
+    # Accept only refinements that stay close to the original prediction
+    # (bounded change ratio) and keep the class distribution alive.
+    # ------------------------------------------------------------------
+    n = max(1, len(initial))
+    change_ratio = float(np.mean(final != initial))
+
+    def _hist(labels):
+        return np.bincount(labels, minlength=num_classes).astype(np.float64)
+
+    def _entropy(counts):
+        total = counts.sum()
+        if total <= 0:
+            return 0.0
+        q = counts / total
+        q = q[q > 0]
+        return float(-(q * np.log(q)).sum())
+
+    h0, h1 = _hist(initial), _hist(final)
+    entropy_ratio = _entropy(h1) / max(_entropy(h0), 1e-8)
+    vanished = int(np.sum((h0 > 0) & (h1 <= 0)))
+
+    max_change = float(context.get("safety_max_change_ratio", 0.35))
+    min_entropy_ratio = float(context.get("safety_min_entropy_ratio", 0.75))
+    accept = (
+        change_ratio <= max_change
+        and entropy_ratio >= min_entropy_ratio
+        and vanished == 0
+    )
+    if not accept:
+        print(
+            f"[ssti-safety] rejected (fallback to raw predictions): "
+            f"change_ratio={change_ratio:.3f} entropy_ratio={entropy_ratio:.3f} "
+            f"vanished_classes={vanished}"
+        )
+        return initial.copy()
+    print(
+        f"[ssti-safety] accepted: change_ratio={change_ratio:.3f} "
+        f"entropy_ratio={entropy_ratio:.3f}"
+    )
+    return final
