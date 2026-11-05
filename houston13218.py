@@ -143,6 +143,10 @@ def build_parser():
 
     # 数据/模型尺寸：Houston patch 由 halfwidth 推导。
     data_group = parser.add_argument_group('Data and model shape')
+    data_group.add_argument('--fda', action='store_true', default=False,
+                            help='Fourier/statistics target re-parameterization of source patches')
+    data_group.add_argument('--fda_start_epoch', default=0, type=int,
+                            help='epoch from which the source patches are re-parameterized')
     data_group.add_argument('--halfwidth', default=3, type=int,
                             help='half width of the spatial patch; patch_size = 2 * halfwidth + 1')
     data_group.add_argument('--backbone_impl', default='ssse', choices=['ssse', 'reliability'],
@@ -751,6 +755,10 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if prat_full is not None and ep >= args.prat_full_start_epoch:
             data1, _ = prat_full(data1, data2, args.prat_full_strength)
 
+        if (getattr(args, 'fda', False) and _FDA_STATS['mu_s'] is not None
+                and ep >= int(getattr(args, 'fda_start_epoch', 0))):
+            data1 = ((data1 - _FDA_STATS['mu_s']) / _FDA_STATS['sd_s']) * _FDA_STATS['sd_t'] \
+                + _FDA_STATS['mu_t']
         eta = 1.0
         src_batch_size = data1.size(0)
         data = Variable(torch.cat((data1, data2), 0))
@@ -1270,6 +1278,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+_FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
 from modules.lscs import (lscs_reset, lscs_observe_source, lscs_update_target_hist,
                          lscs_fit, lscs_select)
 from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
@@ -1407,6 +1416,21 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     # 数据加载阶段：源域有标签训练样本，目标域作为无标签训练与最终测试集合。
     data_path_s, label_path_s, data_path_t, label_path_t = get_houston_paths()
     data = load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed)
+    if getattr(args, 'fda', False):
+        import numpy as _np
+        _tr = _np.asarray(data['trainX'], dtype=_np.float64)
+        _te = _np.asarray(data['testX'], dtype=_np.float64)
+        _ms = _tr.mean(axis=(0, 2, 3)).astype(_np.float32)
+        _ss = (_tr.std(axis=(0, 2, 3)) + 1e-6).astype(_np.float32)
+        _mt = _te.mean(axis=(0, 2, 3)).astype(_np.float32)
+        _st = (_te.std(axis=(0, 2, 3)) + 1e-6).astype(_np.float32)
+        _FDA_STATS['mu_s'] = torch.tensor(_ms, device=DEV).view(1, -1, 1, 1)
+        _FDA_STATS['sd_s'] = torch.tensor(_ss, device=DEV).view(1, -1, 1, 1)
+        _FDA_STATS['mu_t'] = torch.tensor(_mt, device=DEV).view(1, -1, 1, 1)
+        _FDA_STATS['sd_t'] = torch.tensor(_st, device=DEV).view(1, -1, 1, 1)
+        print('[fda] source patches re-parameterized to target per-band statistics '
+              '(mean/std matching)')
+
     if getattr(args, 'm1_dump', ''):
         os.makedirs(args.m1_dump, exist_ok=True)
         np.save(os.path.join(args.m1_dump, 'target_labels.npy'),
