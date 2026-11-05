@@ -258,6 +258,16 @@ def build_parser():
                             help='epoch where the source calibration starts')
     ours_group.add_argument('--rcs_fit_epochs', default=3, type=int,
                             help='number of epochs used to collect source calibration samples')
+    ours_group.add_argument('--lscs', action='store_true', default=False,
+                            help='label-shift-aware corrective supervision (LSCS)')
+    ours_group.add_argument('--lscs_delta', default=0.10, type=float,
+                            help='risk budget for the certified corrective set')
+    ours_group.add_argument('--lscs_class_cap', default=8, type=int,
+                            help='maximum corrected samples per class per batch')
+    ours_group.add_argument('--lscs_min_frac', default=0.02, type=float)
+    ours_group.add_argument('--lscs_max_frac', default=0.60, type=float)
+    ours_group.add_argument('--lscs_start_epoch', default=15, type=int)
+    ours_group.add_argument('--lscs_fit_epochs', default=3, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -867,7 +877,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if memory_batch is not None:
             pats_indices = memory_batch.stable_mask.nonzero(as_tuple=True)[0]
         # ---- RGS diagnosis / intervention: override the supervised set ----
-        _m1_sel = 'rcs' if getattr(args, 'rcs', False) else getattr(args, 'm1_select', 'pats')
+        _m1_sel = ('lscs' if getattr(args, 'lscs', False)
+                   else 'rcs' if getattr(args, 'rcs', False)
+                   else getattr(args, 'm1_select', 'pats'))
         if _m1_sel != 'pats':
             _total = F1_pseudo_label_t.numel()
             _all_idx = torch.arange(_total, device=F1_pseudo_label_t.device)
@@ -901,6 +913,25 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                             q, args.rcs_delta, args.rcs_min_frac, args.rcs_max_frac)
                         pats_indices = torch.from_numpy(keep_idx).long().to(
                             F1_pseudo_label_t.device)
+            elif _m1_sel == 'lscs':
+                with torch.no_grad():
+                    teacher_logits_s, _ = F1_teacher.f(teacher_feat_s)
+                    teacher_prob_s = torch.softmax(teacher_logits_s.float(), dim=1)
+                    lscs_observe_source(teacher_prob_s, output_s1, output_s2, target1)
+                    teacher_logits_t, _ = F1_teacher.f(teacher_feat_t)
+                    teacher_prob_t = torch.softmax(teacher_logits_t.float(), dim=1)
+                    lscs_update_target_hist(teacher_prob_t.argmax(dim=1))
+                    if ep >= int(args.lscs_start_epoch) + int(args.lscs_fit_epochs):
+                        lscs_fit()
+                    keep_idx = lscs_select(
+                        teacher_prob_t, output_t1, output_t2,
+                        delta=args.lscs_delta,
+                        class_cap=args.lscs_class_cap,
+                        min_frac=args.lscs_min_frac,
+                        max_frac=args.lscs_max_frac)
+                    pats_indices = torch.from_numpy(
+                        np.asarray(keep_idx, dtype=np.int64)).long().to(
+                        F1_pseudo_label_t.device)
 
         _pats_mask = None
         if getattr(args, 'm1_dump', ''):
@@ -1233,6 +1264,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.lscs import (lscs_reset, lscs_observe_source, lscs_update_target_hist,
+                         lscs_fit, lscs_select)
 from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
                          rcs_fit, rcs_predict, rcs_risk_select)
 
@@ -1442,6 +1475,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     epoch_test_end = epoch_train_start
     best_seed_acc = -1.0
     rcs_reset()
+    lscs_reset(num_classes)
     for ep in range(1, num_epoch + 1):
         if args.lr_schedule == 'cosine':
             progress = (ep - 1) / max(1, num_epoch - 1)
