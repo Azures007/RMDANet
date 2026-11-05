@@ -1171,6 +1171,11 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
 
     data_path_s, label_path_s, data_path_t, label_path_t = get_nc122nc13_paths()
     data = load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed)
+    if getattr(args, 'm1_dump', ''):
+        os.makedirs(args.m1_dump, exist_ok=True)
+        np.save(os.path.join(args.m1_dump, 'target_labels.npy'),
+                np.asarray(data['testY']))
+
 
     loaders = create_data_loaders(
         data['trainX'], data['trainY'], data['testX'], data['testY'],

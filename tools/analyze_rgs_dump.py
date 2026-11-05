@@ -145,7 +145,14 @@ def main():
     data_root = args.data_root or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datasets"
     )
-    gt = load_target_labels(args.dataset, data_root)
+    saved = os.path.join(args.dump_dir, "target_labels.npy")
+    if os.path.exists(saved):
+        gt = np.load(saved).astype(np.int64).ravel()
+        print(f"[analyze] labels loaded from {saved} (aligned with the training order)")
+    else:
+        print("[analyze] WARNING: target_labels.npy not found, recomputing labels "
+              "(order may not match the training permutation)")
+        gt = load_target_labels(args.dataset, data_root)
     files = sorted(glob.glob(os.path.join(args.dump_dir, "*.npz")))
     if not files:
         raise SystemExit(f"no .npz found under {args.dump_dir}")
