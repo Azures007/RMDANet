@@ -70,6 +70,45 @@ SEEDS = [1599, 1364, 1379, 1672, 1304, 1461, 1718, 1603, 1779, 1358]
 
 _INSTABILITY_EMA = {'value': None}
 
+# ---------------------------------------------------------------------------
+# RGS diagnosis buffer (analysis only: stores ids, predictions, confidences).
+# ---------------------------------------------------------------------------
+_DIAG_BUFFER = []
+
+
+def _diag_reset():
+    _DIAG_BUFFER.clear()
+
+
+def _diag_add(ids, teacher, conf, student, pats_mask, rgs_idx):
+    import numpy as _np
+    with torch.no_grad():
+        total = int(teacher.numel())
+        rgs_mask = torch.zeros(total, dtype=torch.bool, device=teacher.device)
+        if rgs_idx is not None and rgs_idx.numel() > 0:
+            rgs_mask[rgs_idx] = True
+        _DIAG_BUFFER.append({
+            'id': ids.detach().cpu().numpy().astype('int32'),
+            'teacher': teacher.detach().cpu().numpy().astype('int16'),
+            'conf': conf.detach().cpu().numpy().astype('float32'),
+            'student': student.detach().cpu().numpy().astype('int16'),
+            'in_pats': pats_mask.detach().cpu().numpy().astype('bool'),
+            'in_rgs': rgs_mask.detach().cpu().numpy().astype('bool'),
+        })
+
+
+def _diag_flush(path):
+    import os as _os
+    import numpy as _np
+    if not _DIAG_BUFFER:
+        return
+    keys = list(_DIAG_BUFFER[0].keys())
+    merged = {k: _np.concatenate([row[k] for row in _DIAG_BUFFER]) for k in keys}
+    _os.makedirs(_os.path.dirname(path) or '.', exist_ok=True)
+    _np.savez_compressed(path, **merged)
+    _DIAG_BUFFER.clear()
+    print(f"[rgs-diag] dumped {path} ({merged['id'].size} samples)")
+
 
 def build_parser():
     """构建命令行参数；这里只保留当前训练/评估/日志路径实际读取的配置。"""
@@ -210,6 +249,14 @@ def build_parser():
                             help='evaluate after every epoch and keep the best target-test OA '
                                  '(reproduces the protocol implicitly used by TAPDA paper numbers)')
     ours_group = parser.add_argument_group('Ours: reliability-gated pseudo-label supervision')
+    ours_group.add_argument('--m1_select', default='pats',
+                            choices=['pats', 'all', 'random', 'excluded'],
+                            help='RGS sample set for diagnosis/intervention: '
+                                 'pats (default), all, random, excluded')
+    ours_group.add_argument('--m1_dump', default='', type=str,
+                            help='directory for per-sample RGS diagnostics (analysis only)')
+    ours_group.add_argument('--m1_dump_epochs', default='', type=str,
+                            help='comma separated epochs to dump; empty = final epoch')
     ours_group.add_argument('--reliab_ce_weight', default=0.0, type=float,
                             help='maximum weight of the PATS-gated pseudo-label CE (0 disables)')
     ours_group.add_argument('--reliab_ce_min_prob', default=0.95, type=float,
@@ -655,6 +702,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
     F1.train()
     F2.train()
     num_iter = len_src_loader
+    _diag_reset()
     target_diagnostic_state = (
         create_target_diagnostic_state(num_classes)
         if args.log_target_diagnostic else None
@@ -810,6 +858,29 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         pats_indices = target_contrastive_stats.get('selected_indices')
         if memory_batch is not None:
             pats_indices = memory_batch.stable_mask.nonzero(as_tuple=True)[0]
+        # ---- RGS diagnosis / intervention: override the supervised set ----
+        _m1_sel = getattr(args, 'm1_select', 'pats')
+        if _m1_sel != 'pats':
+            _total = F1_pseudo_label_t.numel()
+            _all_idx = torch.arange(_total, device=F1_pseudo_label_t.device)
+            _cur = pats_indices if pats_indices is not None else _all_idx[:0]
+            if _m1_sel == 'all':
+                pats_indices = _all_idx
+            elif _m1_sel == 'excluded':
+                _keep = torch.ones(_total, dtype=torch.bool, device=_all_idx.device)
+                if _cur.numel() > 0:
+                    _keep[_cur] = False
+                pats_indices = _all_idx[_keep]
+            elif _m1_sel == 'random':
+                _k = int(_cur.numel()) if _cur.numel() > 0 else 32
+                pats_indices = torch.randperm(_total, device=_all_idx.device)[:_k]
+        _pats_mask = None
+        if getattr(args, 'm1_dump', ''):
+            _pats_mask = torch.zeros(F1_pseudo_label_t.numel(), dtype=torch.bool,
+                                     device=F1_pseudo_label_t.device)
+            if pats_indices is not None and pats_indices.numel() > 0:
+                _pats_mask[pats_indices] = True
+
         if ((reliab_ce_weight > 0 or proto_anchor_weight > 0)
                 and pats_indices is not None and pats_indices.numel() > 0):
             with torch.no_grad():
@@ -897,6 +968,10 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                               f"gini_all={gini_all:.4f} gini_sel={gini_sel:.4f}")
             if confident.any():
                 sel_idx = pats_indices[confident]
+                if getattr(args, 'm1_dump', '') and _pats_mask is not None:
+                    _diag_add(target_ids, F1_pseudo_label_t, F1_pseudo_prob_t,
+                              output_t1.detach().argmax(dim=1), _pats_mask, sel_idx)
+
                 sel_labels = pats_labels[confident]
                 sel_probs = pats_probs[confident]
                 sel_weight = sel_probs
@@ -1349,6 +1424,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             batch_size, len_src_loader, num_k, args, seed, num_classes, target_quota_state,
             source_prototype_state, prat_full, memory
         )
+        if getattr(args, 'm1_dump', ''):
+            _wanted = [int(x) for x in str(getattr(args, 'm1_dump_epochs', '') or '').split(',') if x.strip()]
+            if (ep in _wanted) or (not _wanted and ep == num_epoch):
+                _diag_flush(os.path.join(args.m1_dump, f"dump_seed{seed}_ep{ep}.npz"))
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
             test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
