@@ -892,7 +892,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     rcs_observe(src_feat, (src_pred == src_lab).astype('int64'))
                     if ep >= int(args.rcs_start_epoch) + int(args.rcs_fit_epochs):
                         rcs_fit()
-                    tgt_feat = rcs_signals(F1_pseudo_prob_t, output_t1, output_t2)
+                    teacher_logits_t, _ = F1_teacher.f(teacher_feat_t)
+                    teacher_prob_t = torch.softmax(teacher_logits_t.detach().float(), dim=1)
+                    tgt_feat = rcs_signals(teacher_prob_t, output_t1, output_t2)
                     q = rcs_predict(tgt_feat)
                     if q is not None:
                         keep_idx = rcs_risk_select(
