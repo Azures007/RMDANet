@@ -580,9 +580,12 @@ batch_size = args.batch_size
 num_k = args.num_k
 
 
-def load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed):
+def load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed, fda=False):
     data_s, label_s = utils.load_data_pavia(data_path_s, label_path_s)
     data_t, label_t = utils.load_data_pavia(data_path_t, label_path_t)
+    if fda:
+        data_s = fda_lowfreq_match(data_s, data_t)
+        print('[fda] source cube low-frequency amplitude matched to target (phase preserved)')
     utils.seed_everything(seed, use_deterministic=True)
 
     train_x, train_y = utils.get_sample_data(data_s, label_s, halfwidth, 180)
@@ -750,10 +753,6 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if prat_full is not None and ep >= args.prat_full_start_epoch:
             data1, _ = prat_full(data1, data2, args.prat_full_strength)
 
-        if (getattr(args, 'fda', False) and _FDA_STATS['mu_s'] is not None
-                and ep >= int(getattr(args, 'fda_start_epoch', 0))):
-            data1 = ((data1 - _FDA_STATS['mu_s']) / _FDA_STATS['sd_s']) * _FDA_STATS['sd_t'] \
-                + _FDA_STATS['mu_t']
         eta = 1.0
         src_batch_size = data1.size(0)
         data = Variable(torch.cat((data1, data2), 0))
@@ -1273,6 +1272,30 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 from modules.ssti import refine_labels
 _FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
+def fda_lowfreq_match(src, tar, radius=0.1):
+    """Source phase + target low-frequency amplitude (per band), cube level.
+
+    Keeps the source spatial/spectral structure (phase) and replaces only the
+    low-frequency magnitude statistics with the target ones.  This is the
+    standard Fourier domain adaptation (FDA) operation adapted to HSI cubes.
+    """
+    import numpy as _np
+    src = _np.asarray(src, dtype=_np.float64)
+    tar = _np.asarray(tar, dtype=_np.float64)
+    h, w, b = src.shape
+    fy = _np.fft.fftfreq(h)[:, None]
+    fx = _np.fft.fftfreq(w)[None, :]
+    r = _np.sqrt(fy ** 2 + fx ** 2)
+    low = r <= float(radius)
+    out = _np.empty_like(src)
+    for i in range(b):
+        fs = _np.fft.fft2(src[..., i])
+        ft = _np.fft.fft2(tar[..., i])
+        scale = _np.abs(ft)[low].mean() / max(1e-8, _np.abs(fs)[low].mean())
+        fs = _np.where(low, fs * scale, fs)
+        out[..., i] = _np.real(_np.fft.ifft2(fs))
+    return out.astype(_np.float32)
+
 from modules.lscs import (lscs_reset, lscs_observe_source, lscs_update_target_hist,
                          lscs_fit, lscs_select)
 from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
@@ -1406,21 +1429,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     print('#######################idataset######################## ', dataset_index)
 
     data_path_s, label_path_s, data_path_t, label_path_t = get_up_pc_paths()
-    data = load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed)
-    if getattr(args, 'fda', False):
-        import numpy as _np
-        _tr = _np.asarray(data['trainX'], dtype=_np.float64)
-        _te = _np.asarray(data['testX'], dtype=_np.float64)
-        _ms = _tr.mean(axis=(0, 2, 3)).astype(_np.float32)
-        _ss = (_tr.std(axis=(0, 2, 3)) + 1e-6).astype(_np.float32)
-        _mt = _te.mean(axis=(0, 2, 3)).astype(_np.float32)
-        _st = (_te.std(axis=(0, 2, 3)) + 1e-6).astype(_np.float32)
-        _FDA_STATS['mu_s'] = torch.tensor(_ms, device=DEV).view(1, -1, 1, 1)
-        _FDA_STATS['sd_s'] = torch.tensor(_ss, device=DEV).view(1, -1, 1, 1)
-        _FDA_STATS['mu_t'] = torch.tensor(_mt, device=DEV).view(1, -1, 1, 1)
-        _FDA_STATS['sd_t'] = torch.tensor(_st, device=DEV).view(1, -1, 1, 1)
-        print('[fda] source patches re-parameterized to target per-band statistics '
-              '(mean/std matching)')
+    data = load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed, getattr(args, 'fda', False))
 
     if getattr(args, 'm1_dump', ''):
         os.makedirs(args.m1_dump, exist_ok=True)
