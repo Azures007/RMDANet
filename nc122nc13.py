@@ -62,6 +62,8 @@ _INSTABILITY_EMA = {'value': None}
 # ---------------------------------------------------------------------------
 _DIAG_BUFFER = []
 
+_RCS_READY = {'model': None}
+
 
 def _diag_reset():
     _DIAG_BUFFER.clear()
@@ -217,6 +219,18 @@ def build_parser():
     runtime_group.add_argument('--seed_offset', type=int, default=0,
                                help='index of the first seed taken from SEEDS')
     ours_group = parser.add_argument_group('Ours: reliability-gated pseudo-label supervision')
+    ours_group.add_argument('--rcs', action='store_true', default=False,
+                            help='risk-certified supplemental supervision (RCS)')
+    ours_group.add_argument('--rcs_delta', default=0.10, type=float,
+                            help='risk budget delta for the certified supervision set')
+    ours_group.add_argument('--rcs_min_frac', default=0.05, type=float,
+                            help='minimum fraction of the target batch to supervise')
+    ours_group.add_argument('--rcs_max_frac', default=0.60, type=float,
+                            help='maximum fraction of the target batch to supervise')
+    ours_group.add_argument('--rcs_start_epoch', default=15, type=int,
+                            help='epoch where the source calibration starts')
+    ours_group.add_argument('--rcs_fit_epochs', default=3, type=int,
+                            help='number of epochs used to collect source calibration samples')
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -748,6 +762,24 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             elif _m1_sel == 'random':
                 _k = int(_cur.numel()) if _cur.numel() > 0 else 32
                 pats_indices = torch.randperm(_total, device=_all_idx.device)[:_k]
+            elif _m1_sel == 'rcs':
+                with torch.no_grad():
+                    teacher_logits_s, _ = F1_teacher.f(teacher_feat_s)
+                    teacher_prob_s = torch.softmax(teacher_logits_s.float(), dim=1)
+                    src_feat = rcs_signals(teacher_prob_s, output_s1, output_s2)
+                    src_pred = teacher_prob_s.argmax(dim=1).cpu().numpy()
+                    src_lab = target1.detach().cpu().numpy()
+                    rcs_observe(src_feat, (src_pred == src_lab).astype('int64'))
+                    if ep >= int(args.rcs_start_epoch) + int(args.rcs_fit_epochs):
+                        rcs_fit()
+                    tgt_feat = rcs_signals(F1_pseudo_prob_t, output_t1, output_t2)
+                    q = rcs_predict(tgt_feat)
+                    if q is not None:
+                        keep_idx = rcs_risk_select(
+                            q, args.rcs_delta, args.rcs_min_frac, args.rcs_max_frac)
+                        pats_indices = torch.from_numpy(keep_idx).long().to(
+                            F1_pseudo_label_t.device)
+
         _pats_mask = None
         if getattr(args, 'm1_dump', ''):
             _pats_mask = torch.zeros(F1_pseudo_label_t.numel(), dtype=torch.bool,
@@ -1041,6 +1073,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
+                         rcs_fit, rcs_predict, rcs_risk_select)
 
 def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     if getattr(args, 'eval_bn_adapt', False) and teacher is None:
@@ -1229,6 +1263,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     epoch_train_start = time.time()
     epoch_test_start = epoch_train_start
     epoch_test_end = epoch_train_start
+    rcs_reset()
     for ep in range(1, num_epoch + 1):
         train_epoch(
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
