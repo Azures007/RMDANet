@@ -232,7 +232,7 @@ def build_parser():
     ours_group.add_argument('--rcs_fit_epochs', default=3, type=int,
                             help='number of epochs used to collect source calibration samples')
     ours_group.add_argument('--m1_select', default='pats',
-                            choices=['pats', 'all', 'random', 'excluded'],
+                            choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
                                  'pats (default), all, random, excluded')
     ours_group.add_argument('--m1_dump', default='', type=str,
@@ -747,7 +747,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if args.m1_scope == 'all':
             pats_indices = torch.arange(F1_pseudo_label_t.numel(), device=F1_pseudo_label_t.device)
         # ---- RGS diagnosis / intervention: override the supervised set ----
-        _m1_sel = getattr(args, 'm1_select', 'pats')
+        _m1_sel = 'rcs' if getattr(args, 'rcs', False) else getattr(args, 'm1_select', 'pats')
         if _m1_sel != 'pats':
             _total = F1_pseudo_label_t.numel()
             _all_idx = torch.arange(_total, device=F1_pseudo_label_t.device)
