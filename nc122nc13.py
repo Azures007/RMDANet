@@ -121,6 +121,10 @@ def build_parser():
                                help='batches between training status prints')
 
     data_group = parser.add_argument_group('Data and model shape')
+    data_group.add_argument('--input_norm', default='none', choices=['none', 'band'],
+                            help='per-band z-score of both scenes (label-free recalibration)')
+    runtime_group.add_argument('--target_repeats', default=1, type=int,
+                               help='multiply the target batches per epoch (coverage scheduling)')
     data_group.add_argument('--fda', action='store_true', default=False,
                             help='Fourier/statistics target re-parameterization of source patches')
     data_group.add_argument('--fda_start_epoch', default=0, type=int,
@@ -495,12 +499,16 @@ def get_sample_data(sample_data, sample_label, halfwidth, num_per_class):
     return processed_data, processed_label
 
 
-def load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed, fda=False):
+def load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed, fda=False, input_norm='none'):
     data_s, label_s = utils.load_data_YRD(data_path_s, label_path_s)
     data_t, label_t = utils.load_data_YRD(data_path_t, label_path_t)
     if fda:
         data_s = fda_lowfreq_match(data_s, data_t)
         print('[fda] source cube low-frequency amplitude matched to target (phase preserved)')
+    if input_norm == 'band':
+        data_s = band_standardize(data_s)
+        data_t = band_standardize(data_t)
+        print('[norm] source/target cubes per-band standardized (label-free)')
     utils.seed_everything(seed, use_deterministic=True)
 
     train_x, train_y = get_sample_data(data_s, label_s, halfwidth, 180)
@@ -626,7 +634,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
     G.train()
     F1.train()
     F2.train()
-    num_iter = len_src_loader
+    num_iter = len_src_loader * max(1, int(getattr(args, 'target_repeats', 1)))
     _diag_reset()
     target_diagnostic_state = (
         create_target_diagnostic_state(num_classes)
@@ -636,6 +644,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
     for batch_idx in range(1, num_iter):
         if batch_idx % len(train_tar_loader) == 0:
             iter_target = iter(train_tar_loader)
+        if batch_idx % len_src_loader == 0:
+            iter_source = iter(train_loader)
         data_source, label_source = next(iter_source)
         data_target, label_target, target_ids = next(iter_target)
         if args.cuda:
@@ -1138,6 +1148,25 @@ def fda_lowfreq_match(src, tar, radius=0.1):
         out[..., i] = _np.real(_np.fft.ifft2(fs))
     return out.astype(_np.float32)
 
+def band_standardize(cube):
+    """Per-band z-score over the valid (non-zero) pixels of one scene.
+
+    Label-free input recalibration: removes the scene-level brightness/scale
+    mismatch (source vs target mean spectra differ by ~92% in Houston).
+    """
+    import numpy as _np
+    cube = _np.asarray(cube, dtype=_np.float32)
+    h, w, b = cube.shape
+    flat = cube.reshape(-1, b)
+    valid = _np.abs(flat).sum(axis=1) > 0
+    if valid.sum() == 0:
+        return cube
+    mu = flat[valid].mean(axis=0, keepdims=True)
+    sd = flat[valid].std(axis=0, keepdims=True) + 1e-6
+    flat = flat.copy()
+    flat[valid] = (flat[valid] - mu) / sd
+    return flat.reshape(h, w, b).astype(_np.float32)
+
 from modules.lscs import (lscs_reset, lscs_observe_source, lscs_update_target_hist,
                          lscs_fit, lscs_select)
 from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
@@ -1271,7 +1300,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     print('#######################idataset######################## ', dataset_index)
 
     data_path_s, label_path_s, data_path_t, label_path_t = get_nc122nc13_paths()
-    data = load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed, getattr(args, 'fda', False))
+    data = load_data_and_preprocess(data_path_s, label_path_s, data_path_t, label_path_t, halfwidth, seed, getattr(args, 'fda', False), getattr(args, 'input_norm', 'none'))
 
     if getattr(args, 'm1_dump', ''):
         os.makedirs(args.m1_dump, exist_ok=True)
