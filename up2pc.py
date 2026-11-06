@@ -314,6 +314,8 @@ def build_parser():
                             help='fix the latent class prior (prevents DS degenerate collapse)')
     ours_group.add_argument('--mvlcr_prior_beta', default=1.0, type=float,
                             help='flatten (<1) the target prior used for projection to protect minority classes')
+    ours_group.add_argument('--mvlcr_gate', default='none', choices=['none', 'disagree'],
+                            help='disagree: only overwrite pixels where the views disagree')
     ours_group.add_argument('--mvlcr_iters', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
@@ -1530,7 +1532,16 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                               iters=args.mvlcr_iters,
                               prior=_mvlcr_prior_hat,
                               fix_prior=bool(getattr(args, 'mvlcr_fix_prior', 1)))
-            predict_ensemble = _post.argmax(axis=1)
+            _mv_post = _post.argmax(axis=1)
+            if str(getattr(args, 'mvlcr_gate', 'none')) == 'disagree':
+                _orig = _p1.argmax(axis=1)
+                _agree = ((_p1.argmax(axis=1) == _p2.argmax(axis=1))
+                          & (_p1.argmax(axis=1) == _MVLCR_STATE['spec'].argmax(axis=1)))
+                _mv_post = _np.where(_agree, _orig, _mv_post)
+                print(f'[mvlcr] gate=disagree: kept {float(_agree.mean())*100:.1f}% pixels unchanged')
+            _mv_change = float((_mv_post != _p1.argmax(axis=1)).mean())
+            print(f'[mvlcr] change ratio vs F1 predictions: {_mv_change*100:.2f}%')
+            predict_ensemble = _mv_post
             acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
 
         if args.eval_mode == 'f1':
