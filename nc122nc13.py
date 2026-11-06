@@ -285,6 +285,8 @@ def build_parser():
                             help='multi-view latent confusion recovery (inference only)')
     ours_group.add_argument('--mvlcr_fix_prior', default=1, type=int,
                             help='fix the latent class prior (prevents DS degenerate collapse)')
+    ours_group.add_argument('--mvlcr_prior_beta', default=1.0, type=float,
+                            help='flatten (<1) the target prior used for projection to protect minority classes')
     ours_group.add_argument('--mvlcr_iters', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
@@ -1361,6 +1363,10 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             _mvlcr_prior_hat = _np.bincount(
                 _p1.argmax(axis=1), minlength=_nc).astype(_np.float64)
             _mvlcr_prior_hat = _mvlcr_prior_hat / max(1.0, _mvlcr_prior_hat.sum())
+            _beta = float(getattr(args, 'mvlcr_prior_beta', 1.0))
+            if _beta != 1.0:
+                _mvlcr_prior_hat = _np.power(_mvlcr_prior_hat + 1e-12, _beta)
+                _mvlcr_prior_hat = _mvlcr_prior_hat / _mvlcr_prior_hat.sum()
             _post = fit_mvlcr([_p1, _p2, _MVLCR_STATE['spec']],
                               _nc,
                               iters=args.mvlcr_iters,
