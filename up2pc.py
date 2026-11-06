@@ -322,8 +322,6 @@ def build_parser():
                             help='only overwrite pixels whose original confidence is below this value')
     ours_group.add_argument('--mvlcr_spatial', default=1, type=int,
                             help='use the neighbourhood-averaged view as a fourth view')
-    ours_group.add_argument('--mvlcr_flip', default=1, type=int,
-                            help='use horizontally flipped-input predictions as an extra TTA view')
     ours_group.add_argument('--mvlcr_iters', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
@@ -1429,7 +1427,6 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
     outputdata = []
     _mv_p1 = []
     _mv_p2 = []
-    _mv_pf = []
     eval_logits_batches = []
 
     with torch.no_grad():
@@ -1496,15 +1493,6 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             if getattr(args, 'mvlcr', False):
                 _mv_p1.append(torch.softmax(logits1.float(), dim=1).cpu().numpy())
                 _mv_p2.append(torch.softmax(logits2.float(), dim=1).cpu().numpy())
-                if int(getattr(args, 'mvlcr_flip', 1)) > 0:
-                    with torch.no_grad():
-                        _flip_in = torch.flip(data1, dims=[-1])
-                        _of, _ = G(_flip_in)
-                        _lf = F1(_of)
-                        if isinstance(_lf, tuple):
-                            _lf = _lf[0]
-                        _pf = torch.softmax(_lf.float(), dim=1)
-                        _mv_pf.append(_pf.cpu().numpy())
             pred1 = logits1.data.max(1)[1]
             pred2 = logits2.data.max(1)[1]
             pred_ensemble = ensemble_logits.data.max(1)[1]
@@ -1546,8 +1534,6 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                 _mvlcr_prior_hat = _np.power(_mvlcr_prior_hat + 1e-12, _beta)
                 _mvlcr_prior_hat = _mvlcr_prior_hat / _mvlcr_prior_hat.sum()
             _views = [_p1, _p2, _MVLCR_STATE['spec']]
-            if int(getattr(args, 'mvlcr_flip', 1)) > 0 and len(_mv_pf) > 0:
-                _views.append(_np.concatenate(_mv_pf, axis=0))
             if (_MVLCR_STATE.get('coords') is not None
                     and int(getattr(args, 'mvlcr_spatial', 1)) > 0):
                 _views.append(spatial_view(_p1, _MVLCR_STATE['coords'],
