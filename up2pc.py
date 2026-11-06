@@ -308,6 +308,9 @@ def build_parser():
     ours_group.add_argument('--capp_alpha', default=0.3, type=float)
     ours_group.add_argument('--capp_temperature', default=1.0, type=float)
     ours_group.add_argument('--capp_shrink', default=0.2, type=float)
+    ours_group.add_argument('--mvlcr', action='store_true', default=False,
+                            help='multi-view latent confusion recovery (inference only)')
+    ours_group.add_argument('--mvlcr_iters', default=30, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1332,10 +1335,13 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.mvlcr import fit_mvlcr, spectral_view
 from modules.capp import build_stats as capp_build_stats, capp_log_probs
 from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
 _FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
+_MVLCR_STATE = {'spec': None}
+
 _CAPP_STATE = {'stats': None}
 
 _TTDC_STATE = {'preds': [], 'bias': None}
@@ -1407,6 +1413,8 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
     predict_f2 = np.array([], dtype=np.int64)
     predict_ensemble = np.array([], dtype=np.int64)
     outputdata = []
+    _mv_p1 = []
+    _mv_p2 = []
     eval_logits_batches = []
 
     with torch.no_grad():
@@ -1470,6 +1478,9 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             if (getattr(args, 'capp', False) or getattr(args, 'spst', False)
                     or getattr(args, 'ttdc', False)) and args.eval_mode == 'ensemble':
                 ensemble_logits = eval_logits
+            if getattr(args, 'mvlcr', False):
+                _mv_p1.append(torch.softmax(logits1.float(), dim=1).cpu().numpy())
+                _mv_p2.append(torch.softmax(logits2.float(), dim=1).cpu().numpy())
             pred1 = logits1.data.max(1)[1]
             pred2 = logits2.data.max(1)[1]
             pred_ensemble = ensemble_logits.data.max(1)[1]
@@ -1495,6 +1506,16 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             )
             predict_ensemble = refined
             acc_ensemble = 100. * float((refined == labels).sum()) / float(len_tar_dataset)
+        if (getattr(args, 'mvlcr', False) and _MVLCR_STATE['spec'] is not None
+                and len(_mv_p1) > 0):
+            import numpy as _np
+            _p1 = _np.concatenate(_mv_p1, axis=0)
+            _p2 = _np.concatenate(_mv_p2, axis=0)
+            _post = fit_mvlcr([_p1, _p2, _MVLCR_STATE['spec']],
+                              num_classes, iters=args.mvlcr_iters)
+            predict_ensemble = _post.argmax(axis=1)
+            acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
+
         if args.eval_mode == 'f1':
             predict_eval = predict_f1
             acc_eval = acc1
@@ -1673,6 +1694,12 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         if ep == num_epoch and getattr(args, 'capp', False):
             _CAPP_STATE['stats'] = capp_build_stats(
                 G, train_loader, num_classes, DEV, args.capp_shrink)
+
+        if ep == num_epoch and getattr(args, 'mvlcr', False):
+            _tr_x = np.asarray(data['trainX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+            _te_x = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+            _MVLCR_STATE['spec'] = spectral_view(
+                _tr_x, data['trainY'], _te_x, num_classes)
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()

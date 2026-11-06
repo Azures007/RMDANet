@@ -1,0 +1,101 @@
+"""Multi-View Latent Confusion Recovery (MV-LCR).
+
+Views
+-----
+1. TAPDA classifier F1 probabilities on the target scene
+2. TAPDA classifier F2 probabilities
+3. A shallow source-trained spectral classifier (logistic regression on the
+   centre-pixel spectra)
+
+Model
+-----
+Dawid-Skene style latent class model
+
+    P(y_hat^1, ..., y_hat^V) = sum_z pi_z prod_v C_v(y_hat^v | z)
+
+fitted with EM on the *unlabeled* target predictions.  The view-specific
+confusion matrices C_v let a systematically biased view be down-weighted, so
+this is not a plain ensemble average and not a label-shift prior correction.
+No target label and no training gradient is used.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+def fit_mvlcr(view_probs, num_classes=None, iters=30, eps=1e-3):
+    """EM for the multi-view latent class model.
+
+    view_probs: list of (N, C) probability matrices (one per view).
+    Returns posterior (N, C).
+    """
+    probs = [np.asarray(p, dtype=np.float64) for p in view_probs]
+    V = len(probs)
+    N, C = probs[0].shape
+    if num_classes is not None:
+        C = int(num_classes)
+
+    hard = np.stack([p.argmax(axis=1) for p in probs], axis=0)  # (V, N)
+
+    post = np.mean(probs, axis=0)
+    post = post / np.maximum(post.sum(axis=1, keepdims=True), 1e-12)
+
+    for it in range(max(1, int(iters))):
+        pi = post.mean(axis=0)
+        pi = np.maximum(pi, eps)
+        pi = pi / pi.sum()
+        confusion = np.full((V, C, C), eps)  # [v, predicted, true]
+        for v in range(V):
+            for c in range(C):
+                m = hard[v] == c
+                if np.any(m):
+                    confusion[v, c] += post[m].sum(axis=0)
+            confusion[v] /= confusion[v].sum(axis=1, keepdims=True)
+
+        logp = np.tile(np.log(pi), (N, 1))
+        for v in range(V):
+            logp += np.log(confusion[v][hard[v]] + 1e-12)
+        logp -= logp.max(axis=1, keepdims=True)
+        new_post = np.exp(logp)
+        new_post /= np.maximum(new_post.sum(axis=1, keepdims=True), 1e-12)
+        delta = np.abs(new_post - post).mean()
+        post = new_post
+        if delta < 1e-6:
+            break
+
+    print(f"[mvlcr] fitted {V} views on {N} target pixels, iters={it}, "
+          f"prior={np.round(pi, 3).tolist()}")
+    return post
+
+
+def spectral_view(train_x, train_y, test_x, num_classes):
+    """Shallow source-trained spectral classifier as an extra view."""
+    from sklearn.linear_model import LogisticRegression
+
+    Xs = np.asarray(train_x, dtype=np.float64)
+    ys = np.asarray(train_y).astype(np.int64).ravel()
+    Xt = np.asarray(test_x, dtype=np.float64)
+    if Xs.ndim > 2:
+        Xs = Xs.reshape(Xs.shape[0], -1)
+    if Xt.ndim > 2:
+        Xt = Xt.reshape(Xt.shape[0], -1)
+    mu, sd = Xs.mean(axis=0, keepdims=True), Xs.std(axis=0, keepdims=True) + 1e-6
+    Xs = (Xs - mu) / sd
+    Xt = (Xt - mu) / sd
+
+    classes = np.unique(ys)
+    # normalise to 0-based contiguous labels for sklearn output mapping
+    if classes.min() >= 1 and classes.max() == len(classes):
+        ys_fit = ys - 1
+    else:
+        ys_fit = ys - classes.min()
+    clf = LogisticRegression(max_iter=300, C=1.0)
+    clf.fit(Xs, ys_fit)
+    raw = clf.predict_proba(Xt)  # columns follow clf.classes_ (0..K-1)
+    probs = np.full((len(Xt), int(num_classes)), 1e-6)
+    probs[:, :raw.shape[1]] = raw
+    probs /= probs.sum(axis=1, keepdims=True)
+    print(f"[mvlcr] spectral view trained on {len(Xs)} source samples, "
+          f"acc unknown (no target labels used)")
+    return probs
