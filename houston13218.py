@@ -315,7 +315,9 @@ def build_parser():
     ours_group.add_argument('--capp_shrink', default=0.2, type=float)
     ours_group.add_argument('--mvlcr', action='store_true', default=False,
                             help='multi-view latent confusion recovery (inference only)')
-    ours_group.add_argument('--mvlcr_iters', default=30, type=int)
+    ours_group.add_argument('--mvlcr_fix_prior', default=1, type=int,
+                            help='fix the latent class prior (prevents DS degenerate collapse)')
+    ours_group.add_argument('--mvlcr_iters', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1519,7 +1521,9 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             _p2 = _np.concatenate(_mv_p2, axis=0)
             _post = fit_mvlcr([_p1, _p2, _MVLCR_STATE['spec']],
                               _MVLCR_STATE.get('num_classes', 7),
-                              iters=args.mvlcr_iters)
+                              iters=args.mvlcr_iters,
+                              prior=_MVLCR_STATE.get('prior', None),
+                              fix_prior=bool(getattr(args, 'mvlcr_fix_prior', 1)))
             predict_ensemble = _post.argmax(axis=1)
             acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
 
@@ -1712,6 +1716,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             _te_x = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
             _MVLCR_STATE['spec'] = spectral_view(
                 _tr_x, data['trainY'], _te_x, num_classes)
+            _mv_y = np.asarray(data['trainY']).astype(np.int64).ravel()
+            if _mv_y.min() == 1:
+                _mv_y = _mv_y - 1
+            _MVLCR_STATE['prior'] = np.bincount(_mv_y, minlength=num_classes)[:num_classes].astype(np.float64)
             _MVLCR_STATE['num_classes'] = int(num_classes)
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:

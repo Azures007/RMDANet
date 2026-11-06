@@ -24,7 +24,8 @@ from __future__ import annotations
 import numpy as np
 
 
-def fit_mvlcr(view_probs, num_classes=None, iters=30, eps=1e-3):
+def fit_mvlcr(view_probs, num_classes=None, iters=30, eps=1e-3,
+              prior=None, fix_prior=False):
     """EM for the multi-view latent class model.
 
     view_probs: list of (N, C) probability matrices (one per view).
@@ -38,13 +39,23 @@ def fit_mvlcr(view_probs, num_classes=None, iters=30, eps=1e-3):
 
     hard = np.stack([p.argmax(axis=1) for p in probs], axis=0)  # (V, N)
 
-    post = np.mean(probs, axis=0)
+    # initialise from the most reliable view instead of the mean of all views
+    post = probs[0].copy()
     post = post / np.maximum(post.sum(axis=1, keepdims=True), 1e-12)
+    fixed_pi = None
+    if fix_prior:
+        fixed_pi = (np.asarray(prior, dtype=np.float64)
+                    if prior is not None else np.full(C, 1.0 / C))
+        fixed_pi = np.maximum(fixed_pi, eps)
+        fixed_pi = fixed_pi / fixed_pi.sum()
 
     for it in range(max(1, int(iters))):
-        pi = post.mean(axis=0)
-        pi = np.maximum(pi, eps)
-        pi = pi / pi.sum()
+        if fixed_pi is not None:
+            pi = fixed_pi
+        else:
+            pi = post.mean(axis=0)
+            pi = np.maximum(pi, eps)
+            pi = pi / pi.sum()
         confusion = np.full((V, C, C), eps)  # [v, predicted, true]
         for v in range(V):
             for c in range(C):
