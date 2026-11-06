@@ -147,7 +147,8 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
 def build_context(source_label_map, target_label_map, num_classes, device,
                   source_loader=None, G=None, F1=None, smoothing=0.1, coords=None,
                   structure="gt", source_image=None, halfwidth=0, pred_confidence=0.9,
-                  source_only_epochs=20, source_only_lr=0.01, target_spectra=None):
+                  source_only_epochs=20, source_only_lr=0.01, target_spectra=None,
+                  sepg_tau=1.0, sepg_kappa=2.0):
     if structure == "predicted":
         if source_image is None:
             raise ValueError("structure='predicted' requires the source image")
@@ -203,6 +204,8 @@ def build_context(source_label_map, target_label_map, num_classes, device,
         "spectra": (np.asarray(target_spectra, dtype=np.float32)
                     if target_spectra is not None else None),
         "edge_sigma": None,
+        "sepg_tau": float(sepg_tau),
+        "sepg_kappa": float(sepg_kappa),
     }
 
 
@@ -335,9 +338,11 @@ def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
             if spectra is not None:
                 _nb = index_grid[neighbour_rows[inside], neighbour_cols[inside]][keep]
                 _d = np.linalg.norm(spectra[valid_index] - spectra[_nb], axis=1)
-                _w = np.exp(-(_d ** 2) / (2.0 * edge_sigma ** 2))
+                _tau = float(context.get("sepg_tau", 1.0))
+                _kappa = float(context.get("sepg_kappa", 2.0))
+                _w = np.exp(-((_d / edge_sigma) ** 2) / (2.0 * _tau ** 2))
                 # block propagation across strong spectral edges
-                _w = np.where(_d > 2.0 * edge_sigma, 0.0, _w)
+                _w = np.where(_d > _kappa * edge_sigma, 0.0, _w)
                 neighbour_score[valid_index] += _base * torch.from_numpy(
                     _w.astype(np.float32)).to(device).unsqueeze(1)
             else:

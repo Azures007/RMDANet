@@ -299,6 +299,10 @@ def build_parser():
                             help='flip-rate threshold to treat a pixel as unstable')
     ours_group.add_argument('--sepg', action='store_true', default=False,
                             help='spectral-edge gated posterior graph decoding (inference only)')
+    ours_group.add_argument('--sepg_tau', default=1.0, type=float,
+                            help='spectral edge weight sharpness (smaller = sharper)')
+    ours_group.add_argument('--sepg_kappa', default=2.0, type=float,
+                            help='block propagation when spectral distance > kappa * sigma')
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1579,6 +1583,8 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             coords=(rows, cols),
             structure=('potts' if getattr(args, 'sepg', False) and not getattr(args, 'ssti', False) else args.ssti_structure),
             target_spectra=_spec,
+            sepg_tau=float(getattr(args, 'sepg_tau', 1.0)),
+            sepg_kappa=float(getattr(args, 'sepg_kappa', 2.0)),
             source_image=source_image,
             halfwidth=halfwidth,
             pred_confidence=args.ssti_pred_conf,
