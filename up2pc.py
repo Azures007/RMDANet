@@ -297,6 +297,8 @@ def build_parser():
                             help='number of perturbed forward passes')
     ours_group.add_argument('--spst_flip_thresh', default=0.5, type=float,
                             help='flip-rate threshold to treat a pixel as unstable')
+    ours_group.add_argument('--sepg', action='store_true', default=False,
+                            help='spectral-edge gated posterior graph decoding (inference only)')
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1462,7 +1464,7 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
         acc1 = 100. * float(correct1) / float(len_tar_dataset)
         acc2 = 100. * float(correct2) / float(len_tar_dataset)
         acc_ensemble = 100. * float(correct_ensemble) / float(len_tar_dataset)
-        if ssti_context is not None and getattr(args, 'ssti', False):
+        if ssti_context is not None and (getattr(args, 'ssti', False) or getattr(args, 'sepg', False)):
             logits_all = torch.cat(eval_logits_batches, 0)
             refined = refine_labels(
                 logits_all, ssti_context, labels,
@@ -1560,7 +1562,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     target_quota_state = create_target_class_quota_state(num_classes, DEV, args)
     source_prototype_state = create_source_prototype_state(num_classes, DEV, args)
     ssti_context = None
-    if getattr(args, 'ssti', False):
+    if getattr(args, 'ssti', False) or getattr(args, 'sepg', False):
         from modules.ssti import build_context
         source_image = utils.load_data_pavia(data_path_s, label_path_s)[0]
         source_label_map = utils.load_data_pavia(data_path_s, label_path_s)[1]
@@ -1568,11 +1570,15 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
         permutation = np.asarray(data['RandPerm'], dtype=np.int64)
         rows = np.asarray(data['Row'], dtype=np.int64)[permutation] - halfwidth
         cols = np.asarray(data['Column'], dtype=np.int64)[permutation] - halfwidth
+        _spec = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+        _spec = ((_spec - _spec.mean(axis=0, keepdims=True))
+                 / (_spec.std(axis=0, keepdims=True) + 1e-6))
         ssti_context = build_context(
             source_label_map, target_label_map, num_classes, DEV,
             source_loader=train_loader, G=G, F1=F1,
             coords=(rows, cols),
-            structure=args.ssti_structure,
+            structure=('potts' if getattr(args, 'sepg', False) and not getattr(args, 'ssti', False) else args.ssti_structure),
+            target_spectra=_spec,
             source_image=source_image,
             halfwidth=halfwidth,
             pred_confidence=args.ssti_pred_conf,

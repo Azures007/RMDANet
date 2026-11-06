@@ -147,7 +147,7 @@ def source_confusion(G, F1, source_loader, num_classes, device, max_batches=100)
 def build_context(source_label_map, target_label_map, num_classes, device,
                   source_loader=None, G=None, F1=None, smoothing=0.1, coords=None,
                   structure="gt", source_image=None, halfwidth=0, pred_confidence=0.9,
-                  source_only_epochs=20, source_only_lr=0.01):
+                  source_only_epochs=20, source_only_lr=0.01, target_spectra=None):
     if structure == "predicted":
         if source_image is None:
             raise ValueError("structure='predicted' requires the source image")
@@ -200,6 +200,9 @@ def build_context(source_label_map, target_label_map, num_classes, device,
         "G": G,
         "F1": F1,
         "device": device,
+        "spectra": (np.asarray(target_spectra, dtype=np.float32)
+                    if target_spectra is not None else None),
+        "edge_sigma": None,
     }
 
 
@@ -284,6 +287,32 @@ def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
     grid[rows, cols] = initial
     offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
+    # --- SEPG: spectral-edge gated propagation ---------------------------
+    spectra = context.get("spectra", None)
+    index_grid = None
+    edge_sigma = None
+    if spectra is not None:
+        spectra = np.asarray(spectra, dtype=np.float32)
+        index_grid = np.full((height, width), -1, dtype=np.int64)
+        index_grid[rows, cols] = np.arange(len(rows))
+        if context.get("edge_sigma") is None:
+            dists = []
+            for dr, dc in offsets:
+                nr, nc = rows + dr, cols + dc
+                ins = (nr >= 0) & (nr < height) & (nc >= 0) & (nc < width)
+                vi = np.nonzero(ins)[0]
+                if len(vi) == 0:
+                    continue
+                ni = index_grid[nr[ins], nc[ins]]
+                keep = ni >= 0
+                vi, ni = vi[keep], ni[keep]
+                if len(vi) == 0:
+                    continue
+                dists.append(np.linalg.norm(spectra[vi] - spectra[ni], axis=1))
+            context["edge_sigma"] = (float(np.median(np.concatenate(dists)) + 1e-6)
+                                     if dists else 1.0)
+        edge_sigma = float(context["edge_sigma"])
+
     for _ in range(max(1, int(iterations))):
         neighbour_score = torch.zeros((len(rows), num_classes), device=device)
         for dr, dc in offsets:
@@ -302,7 +331,17 @@ def refine_labels(logits, context, labels, alpha=0.1, beta=0.1, iterations=3,
             neighbour_labels = neighbour_labels[keep]
             if len(valid_index) == 0:
                 continue
-            neighbour_score[valid_index] += log_transition[:, neighbour_labels].t()
+            _base = log_transition[:, neighbour_labels].t()
+            if spectra is not None:
+                _nb = index_grid[neighbour_rows[inside], neighbour_cols[inside]][keep]
+                _d = np.linalg.norm(spectra[valid_index] - spectra[_nb], axis=1)
+                _w = np.exp(-(_d ** 2) / (2.0 * edge_sigma ** 2))
+                # block propagation across strong spectral edges
+                _w = np.where(_d > 2.0 * edge_sigma, 0.0, _w)
+                neighbour_score[valid_index] += _base * torch.from_numpy(
+                    _w.astype(np.float32)).to(device).unsqueeze(1)
+            else:
+                neighbour_score[valid_index] += _base
         score = log_probability + alpha * bias.unsqueeze(0) + beta * neighbour_score
         refined = score.argmax(dim=1).cpu().numpy()
         # Only the uncertain pixels may change; confident predictions are frozen.
