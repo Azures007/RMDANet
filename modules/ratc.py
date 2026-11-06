@@ -70,3 +70,47 @@ def diagnose(G, F1, F2, loader, device, threshold=0.35, n_batches=6):
     choice = "tent" if shift > float(threshold) else "mvlcr"
     print(f"[ratc] BN shift = {shift:.4f} (threshold {threshold}) -> chose {choice}")
     return shift, choice
+
+
+def mean_entropy(G, F1, F2, loader, device, n_batches=6):
+    """Mean prediction entropy on the unlabeled target (label-free)."""
+    import torch
+
+    for net in (G, F1, F2):
+        net.eval()
+    total, count = 0.0, 0
+    with torch.no_grad():
+        for data, _ in loader:
+            feat, _ = G(data.to(device))
+            l1, l2 = F1(feat), F2(feat)
+            if isinstance(l1, tuple):
+                l1 = l1[0]
+            if isinstance(l2, tuple):
+                l2 = l2[0]
+            p = torch.softmax(0.5 * (l1 + l2), dim=1)
+            ent = -(p * torch.log(p.clamp_min(1e-8))).sum(dim=1)
+            total += float(ent.sum())
+            count += ent.numel()
+            if count >= n_batches * data.shape[0]:
+                break
+    return total / max(1, count)
+
+
+def snapshot_bn(nets):
+    states = []
+    for net in nets:
+        for m in net.modules():
+            if hasattr(m, "running_mean") and m.running_mean is not None:
+                states.append((m, m.weight.detach().clone(), m.bias.detach().clone(),
+                               m.running_mean.detach().clone(), m.running_var.detach().clone()))
+    return states
+
+
+def restore_bn(states):
+    import torch
+    with torch.no_grad():
+        for m, w, b, rm, rv in states:
+            m.weight.copy_(w)
+            m.bias.copy_(b)
+            m.running_mean.copy_(rm)
+            m.running_var.copy_(rv)

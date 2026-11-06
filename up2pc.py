@@ -341,6 +341,7 @@ def build_parser():
     ours_group.add_argument('--ratc_thresh', default=0.35, type=float)
     ours_group.add_argument('--ratc_tent_steps', default=20, type=int)
     ours_group.add_argument('--ratc_probe_batches', default=6, type=int)
+    ours_group.add_argument('--ratc_probe_steps', default=2, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1365,7 +1366,10 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
-from modules.ratc import diagnose as ratc_diagnose
+from modules.ratc import (diagnose as ratc_diagnose,
+                          mean_entropy as ratc_mean_entropy,
+                          snapshot_bn as ratc_snapshot_bn,
+                          restore_bn as ratc_restore_bn)
 from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
@@ -1803,15 +1807,40 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             tent_adapt(G, F1, F2, test_loader, DEV, args)
 
         if getattr(args, 'ratc', False) and ep == num_epoch:
-            _shift, _choice = ratc_diagnose(
-                G, F1, F2, test_loader, DEV,
-                threshold=float(args.ratc_thresh),
-                n_batches=int(args.ratc_probe_batches))
-            if _choice == 'tent':
-                args.tent_steps = int(args.ratc_tent_steps)
-                tent_adapt(G, F1, F2, test_loader, DEV, args)
+            _h0 = ratc_mean_entropy(G, F1, F2, test_loader, DEV,
+                                    n_batches=int(args.ratc_probe_batches))
+            _snap = ratc_snapshot_bn((G, F1, F2))
+            _probe_args = argparse.Namespace(**vars(args))
+            _probe_args.tent_steps = int(args.ratc_probe_steps)
+            tent_adapt(G, F1, F2, test_loader, DEV, _probe_args)
+            _h1 = ratc_mean_entropy(G, F1, F2, test_loader, DEV,
+                                    n_batches=int(args.ratc_probe_batches))
+            _ratio = (_h0 - _h1) / max(1e-8, _h0)
+            print(f'[ratc] entropy {_h0:.4f} -> {_h1:.4f}, reduction ratio {_ratio:.3f} '
+                  f'(threshold {args.ratc_thresh})')
+            if _ratio > float(args.ratc_thresh):
+                print('[ratc] chose TENT (strongly compressible BN statistics)')
+                _apply_args = argparse.Namespace(**vars(args))
+                _apply_args.tent_steps = int(args.ratc_tent_steps)
+                tent_adapt(G, F1, F2, test_loader, DEV, _apply_args)
             else:
+                print('[ratc] chose MV-LCR (BN already adapted)')
+                ratc_restore_bn(_snap)
                 args.mvlcr = True
+                _tr_x = np.asarray(data['trainX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+                _te_x = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+                _MVLCR_STATE['spec'] = spectral_view(_tr_x, data['trainY'], _te_x, num_classes)
+                _MVLCR_STATE['num_classes'] = int(num_classes)
+                _perm = np.asarray(data['RandPerm'], dtype=np.int64)
+                _MVLCR_STATE['coords'] = (
+                    np.asarray(data['Row'], dtype=np.int64)[_perm] - halfwidth,
+                    np.asarray(data['Column'], dtype=np.int64)[_perm] - halfwidth)
+                _MVLCR_STATE['shape'] = (int(_MVLCR_STATE['coords'][0].max()) + halfwidth + 2,
+                                         int(_MVLCR_STATE['coords'][1].max()) + halfwidth + 2)
+                _mv_y = np.asarray(data['trainY']).astype(np.int64).ravel()
+                if _mv_y.min() == 1:
+                    _mv_y = _mv_y - 1
+                _MVLCR_STATE['prior'] = np.bincount(_mv_y, minlength=num_classes)[:num_classes].astype(np.float64)
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
