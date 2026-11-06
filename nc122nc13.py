@@ -1256,7 +1256,7 @@ from modules.lscs import (lscs_reset, lscs_observe_source, lscs_update_target_hi
 from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
                          rcs_fit, rcs_predict, rcs_risk_select)
 
-def test_model(test_loader, _G_EVAL, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
+def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     if getattr(args, 'eval_bn_adapt', False) and teacher is None:
         G.train()
         F1.train()
@@ -1593,7 +1593,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
 
         if ep % num_epoch == 0:
             epoch_test_start = time.time()
-            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
+            test_result = test_model(test_loader, _G_EVAL, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
             epoch_test_end = time.time()
 
             class_acc, kappa = update_dataset_metrics(metrics_state, dataset_index, test_result)

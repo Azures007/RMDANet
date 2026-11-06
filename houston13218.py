@@ -1420,7 +1420,7 @@ from modules.lscs import (lscs_reset, lscs_observe_source, lscs_update_target_hi
 from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
                          rcs_fit, rcs_predict, rcs_risk_select)
 
-def test_model(test_loader, _G_EVAL, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
+def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     """在目标域测试集上评估 F1/F2/ensemble，并返回后续汇总需要的预测结果。"""
     if getattr(args, 'eval_bn_adapt', False) and teacher is None:
         G.train()
@@ -1786,7 +1786,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
-            test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
+            test_result = test_model(test_loader, _G_EVAL, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
             epoch_test_end = time.time()
 
             if (not args.eval_every_epoch) or test_result['acc_eval'] > best_seed_acc:
