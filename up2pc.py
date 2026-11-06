@@ -342,6 +342,11 @@ def build_parser():
     ours_group.add_argument('--ratc_tent_steps', default=20, type=int)
     ours_group.add_argument('--ratc_probe_batches', default=6, type=int)
     ours_group.add_argument('--ratc_probe_steps', default=2, type=int)
+    ours_group.add_argument('--cns', action='store_true', default=False,
+                            help='replace PATS selection with consensus-neighbourhood selection')
+    ours_group.add_argument('--cns_ratio', default=0.75, type=float,
+                            help='fraction of each class kept for contrastive distillation')
+    ours_group.add_argument('--cns_min_per_class', default=1, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -979,7 +984,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         if memory_batch is not None:
             pats_indices = memory_batch.stable_mask.nonzero(as_tuple=True)[0]
         # ---- RGS diagnosis / intervention: override the supervised set ----
-        _m1_sel = ('lscs' if getattr(args, 'lscs', False)
+        _m1_sel = ('cns' if getattr(args, 'cns', False)
+                   else 'lscs' if getattr(args, 'lscs', False)
                    else 'rcs' if getattr(args, 'rcs', False)
                    else getattr(args, 'm1_select', 'pats'))
         if _m1_sel != 'pats':
@@ -996,6 +1002,30 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             elif _m1_sel == 'random':
                 _k = int(_cur.numel()) if _cur.numel() > 0 else 32
                 pats_indices = torch.randperm(_total, device=_all_idx.device)[:_k]
+            elif _m1_sel == 'cns':
+                with torch.no_grad():
+                    _t_pred = F1_pseudo_label_t.view(-1).long()
+                    _t_conf = F1_pseudo_prob_t.view(-1).float()
+                    _p1 = output_t1.detach().argmax(dim=1)
+                    _p2 = output_t2.detach().argmax(dim=1)
+                    _agree = (_p1.eq(_t_pred).float() + _p2.eq(_t_pred).float())
+                    _score = _t_conf + 0.5 * _agree
+                    _keep = []
+                    for _c in range(int(num_classes)):
+                        _idx = (_t_pred == _c).nonzero(as_tuple=True)[0]
+                        if _idx.numel() == 0:
+                            continue
+                        _k = max(int(args.cns_min_per_class),
+                                 int(round(float(args.cns_ratio) * float(_idx.numel()))))
+                        _k = min(_k, int(_idx.numel()))
+                        _vals = _score[_idx]
+                        _sel = _idx[torch.topk(_vals, _k).indices]
+                        _keep.append(_sel)
+                    if _keep:
+                        pats_indices = torch.cat(_keep).long()
+                    else:
+                        pats_indices = torch.zeros(0, dtype=torch.long,
+                                                   device=F1_pseudo_label_t.device)
             elif _m1_sel == 'rcs':
                 with torch.no_grad():
                     teacher_logits_s, _ = F1_teacher.f(teacher_feat_s)
