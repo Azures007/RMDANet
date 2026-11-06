@@ -1354,7 +1354,8 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             _p1 = _np.concatenate(_mv_p1, axis=0)
             _p2 = _np.concatenate(_mv_p2, axis=0)
             _post = fit_mvlcr([_p1, _p2, _MVLCR_STATE['spec']],
-                              num_classes, iters=args.mvlcr_iters)
+                              _MVLCR_STATE.get('num_classes', 7),
+                              iters=args.mvlcr_iters)
             predict_ensemble = _post.argmax(axis=1)
             acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
 
@@ -1518,6 +1519,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             _te_x = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
             _MVLCR_STATE['spec'] = spectral_view(
                 _tr_x, data['trainY'], _te_x, num_classes)
+            _MVLCR_STATE['num_classes'] = int(num_classes)
 
         if ep % num_epoch == 0:
             epoch_test_start = time.time()
