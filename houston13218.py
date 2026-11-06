@@ -328,6 +328,13 @@ def build_parser():
     ours_group.add_argument('--mvlcr_spatial', default=1, type=int,
                             help='use the neighbourhood-averaged view as a fourth view')
     ours_group.add_argument('--mvlcr_iters', default=5, type=int)
+    ours_group.add_argument('--tmsa', action='store_true', default=False,
+                            help='target masked spectral adapter with source anchoring (test-time)')
+    ours_group.add_argument('--tmsa_steps', default=30, type=int)
+    ours_group.add_argument('--tmsa_lr', default=1e-3, type=float)
+    ours_group.add_argument('--tmsa_rank', default=16, type=int)
+    ours_group.add_argument('--tmsa_mask', default=8, type=int)
+    ours_group.add_argument('--tmsa_anchor', default=1e-4, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1353,6 +1360,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view
 from modules.capp import build_stats as capp_build_stats, capp_log_probs
 from modules.ttdc import collect_predictions, build_bias
@@ -1412,7 +1420,7 @@ from modules.lscs import (lscs_reset, lscs_observe_source, lscs_update_target_hi
 from modules.rcs import (rcs_reset, rcs_signals, rcs_observe,
                          rcs_fit, rcs_predict, rcs_risk_select)
 
-def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
+def test_model(test_loader, _G_EVAL, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=None, teacher=None):
     """在目标域测试集上评估 F1/F2/ensemble，并返回后续汇总需要的预测结果。"""
     if getattr(args, 'eval_bn_adapt', False) and teacher is None:
         G.train()
@@ -1725,6 +1733,7 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     _TTDC_STATE['preds'].clear()
     _TTDC_STATE['bias'] = None
 
+    _G_EVAL = G
     for ep in range(1, num_epoch + 1):
         if args.lr_schedule == 'cosine':
             progress = (ep - 1) / max(1, num_epoch - 1)
@@ -1771,6 +1780,9 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
                 _mv_y = _mv_y - 1
             _MVLCR_STATE['prior'] = np.bincount(_mv_y, minlength=num_classes)[:num_classes].astype(np.float64)
             _MVLCR_STATE['num_classes'] = int(num_classes)
+
+        if getattr(args, 'tmsa', False) and ep == num_epoch:
+            _G_EVAL = tmsa_adapt(G, test_loader, DEV, args)
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
