@@ -1429,7 +1429,6 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             eval_logits = select_eval_logits(logits1, logits2, args.eval_mode)
             if teacher is not None and args.eval_teacher and args.eval_mode == 'ensemble':
                 eval_logits = ensemble_logits
-            eval_logits_batches.append(eval_logits.detach().cpu())
             if getattr(args, 'capp', False) and _CAPP_STATE['stats'] is not None:
                 _lp = capp_log_probs(output, _CAPP_STATE['stats'],
                                      float(args.capp_temperature)).to(eval_logits.device)
@@ -1465,6 +1464,7 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                 _off = len(predict_ensemble)
                 _bias = _TTDC_STATE['bias'][_off:_off + eval_logits.size(0)]
                 eval_logits = eval_logits + eval_logits.new_tensor(_bias)
+            eval_logits_batches.append(eval_logits.detach().cpu())
             test_loss += F.cross_entropy(eval_logits, target1.long(), reduction='sum').item()
 
             pred1 = logits1.data.max(1)[1]
