@@ -1402,6 +1402,9 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     epoch_test_end = epoch_train_start
     rcs_reset()
     lscs_reset(num_classes)
+    _TTDC_STATE['preds'].clear()
+    _TTDC_STATE['bias'] = None
+
     for ep in range(1, num_epoch + 1):
         train_epoch(
             ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,

@@ -1578,6 +1578,9 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     best_seed_acc = -1.0
     rcs_reset()
     lscs_reset(num_classes)
+    _TTDC_STATE['preds'].clear()
+    _TTDC_STATE['bias'] = None
+
     for ep in range(1, num_epoch + 1):
         if args.lr_schedule == 'cosine':
             progress = (ep - 1) / max(1, num_epoch - 1)
