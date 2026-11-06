@@ -403,6 +403,46 @@ def select_target_contrastive_samples(
     source_prototype_state=None
 ):
     selection_mode = get_target_contrastive_selection_mode(args)
+
+    # ---- CNS: consensus-neighbourhood selection replacing the PATS pipeline ----
+    # Keep a class-balanced fraction of the target samples chosen by teacher
+    # confidence instead of the prototype filter + tiny per-class top-k, which
+    # discards ~57% of the target samples (measured on Houston).
+    if getattr(args, 'cns', False):
+        ratio = float(getattr(args, 'cns_ratio', 0.75))
+        min_per = int(getattr(args, 'cns_min_per_class', 1))
+        import torch as _torch
+        scores = pseudo_probs if selection_scores is None else selection_scores
+        keep = []
+        for _c in range(int(num_classes)):
+            _idx = (_torch.as_tensor(pseudo_labels) == _c).nonzero(as_tuple=True)[0]
+            if _idx.numel() == 0:
+                continue
+            _k = max(min_per, int(round(ratio * float(_idx.numel()))))
+            _k = min(_k, int(_idx.numel()))
+            _sel = _idx[_torch.topk(scores[_idx], _k).indices]
+            keep.append(_sel)
+        if keep:
+            selected_indices = _torch.cat(keep).long()
+        else:
+            selected_indices = _torch.as_tensor(pseudo_labels).new_empty((0,), dtype=_torch.long)
+        selected_indices = filter_target_contrastive_pairs(
+            selected_indices, pseudo_labels, num_classes)
+        selected_per_class = summarize_selected_target_classes(
+            selected_indices, pseudo_labels, num_classes)
+        metadata = {
+            'threshold': 0.0,
+            'selection_mode': 'cns',
+            'selected_per_class': selected_per_class,
+            'selected_classes': int(sum(count > 0 for count in selected_per_class)),
+            'prototype_filter': 'off',
+            'prototype_before': int(selected_indices.numel()),
+            'prototype_after': int(selected_indices.numel()),
+            'prototype_keep_rate': 1.0,
+            'prototype_valid_classes': 0,
+        }
+        return selected_indices, metadata
+
     if selection_scores is None:
         selection_scores = pseudo_probs
     if ranking_scores is None:
