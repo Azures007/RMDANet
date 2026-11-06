@@ -117,3 +117,30 @@ def spectral_view(train_x, train_y, test_x, num_classes):
     print(f"[mvlcr] spectral view trained on {len(Xs)} source samples, "
           f"acc unknown (no target labels used)")
     return probs
+
+
+def spatial_view(probs, coords, shape, passes=1):
+    """Neighbourhood-averaged probability view (label-free, different error profile)."""
+    import numpy as np
+    from scipy.ndimage import uniform_filter
+
+    P = np.asarray(probs, dtype=np.float32)
+    rows, cols = np.asarray(coords[0], dtype=np.int64), np.asarray(coords[1], dtype=np.int64)
+    h, w = int(shape[0]), int(shape[1])
+    C = P.shape[1]
+    grid = np.zeros((h, w, C), dtype=np.float32)
+    mask = np.zeros((h, w), dtype=np.float32)
+    grid[rows, cols] = P
+    mask[rows, cols] = 1.0
+
+    cur = grid
+    for _ in range(max(1, int(passes))):
+        den = uniform_filter(mask, size=3, mode="constant")
+        num = np.stack([uniform_filter(cur[..., c], size=3, mode="constant")
+                        for c in range(C)], axis=-1)
+        cur = num / np.maximum(den[..., None], 1e-6)
+    out = cur[rows, cols]
+    out = np.maximum(out, 1e-6)
+    out /= out.sum(axis=1, keepdims=True)
+    print(f"[mvlcr] spatial view built (passes={passes})")
+    return out

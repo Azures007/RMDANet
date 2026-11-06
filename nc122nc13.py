@@ -293,6 +293,8 @@ def build_parser():
                             help='soft blending weight: p = (1-a)*p_orig + a*p_mvlcr')
     ours_group.add_argument('--mvlcr_conf_gate', default=0.0, type=float,
                             help='only overwrite pixels whose original confidence is below this value')
+    ours_group.add_argument('--mvlcr_spatial', default=1, type=int,
+                            help='use the neighbourhood-averaged view as a fourth view')
     ours_group.add_argument('--mvlcr_iters', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
@@ -1187,7 +1189,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
-from modules.mvlcr import fit_mvlcr, spectral_view
+from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view
 from modules.capp import build_stats as capp_build_stats, capp_log_probs
 from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
@@ -1373,7 +1375,12 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             if _beta != 1.0:
                 _mvlcr_prior_hat = _np.power(_mvlcr_prior_hat + 1e-12, _beta)
                 _mvlcr_prior_hat = _mvlcr_prior_hat / _mvlcr_prior_hat.sum()
-            _post = fit_mvlcr([_p1, _p2, _MVLCR_STATE['spec']],
+            _views = [_p1, _p2, _MVLCR_STATE['spec']]
+            if (_MVLCR_STATE.get('coords') is not None
+                    and int(getattr(args, 'mvlcr_spatial', 1)) > 0):
+                _views.append(spatial_view(_p1, _MVLCR_STATE['coords'],
+                                           _MVLCR_STATE.get('shape', (512, 512))))
+            _post = fit_mvlcr(_views,
                               _nc,
                               iters=args.mvlcr_iters,
                               prior=_mvlcr_prior_hat,
@@ -1561,6 +1568,11 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             _te_x = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
             _MVLCR_STATE['spec'] = spectral_view(
                 _tr_x, data['trainY'], _te_x, num_classes)
+            _perm = np.asarray(data['RandPerm'], dtype=np.int64)
+            _mv_rows = np.asarray(data['Row'], dtype=np.int64)[_perm] - halfwidth
+            _mv_cols = np.asarray(data['Column'], dtype=np.int64)[_perm] - halfwidth
+            _MVLCR_STATE['coords'] = (_mv_rows, _mv_cols)
+            _MVLCR_STATE['shape'] = _MVLCR_STATE.get('shape') or (int(_mv_rows.max()) + halfwidth + 2, int(_mv_cols.max()) + halfwidth + 2)
             _mv_y = np.asarray(data['trainY']).astype(np.int64).ravel()
             if _mv_y.min() == 1:
                 _mv_y = _mv_y - 1
