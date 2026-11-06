@@ -1473,6 +1473,9 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             eval_logits_batches.append(eval_logits.detach().cpu())
             test_loss += F.cross_entropy(eval_logits, target1.long(), reduction='sum').item()
 
+            if (getattr(args, 'capp', False) or getattr(args, 'spst', False)
+                    or getattr(args, 'ttdc', False)) and args.eval_mode == 'ensemble':
+                ensemble_logits = eval_logits
             pred1 = logits1.data.max(1)[1]
             pred2 = logits2.data.max(1)[1]
             pred_ensemble = ensemble_logits.data.max(1)[1]
