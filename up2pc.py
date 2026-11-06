@@ -303,6 +303,11 @@ def build_parser():
                             help='spectral edge weight sharpness (smaller = sharper)')
     ours_group.add_argument('--sepg_kappa', default=2.0, type=float,
                             help='block propagation when spectral distance > kappa * sigma')
+    ours_group.add_argument('--capp', action='store_true', default=False,
+                            help='covariance-aware prototype posterior (inference only)')
+    ours_group.add_argument('--capp_alpha', default=0.3, type=float)
+    ours_group.add_argument('--capp_temperature', default=1.0, type=float)
+    ours_group.add_argument('--capp_shrink', default=0.2, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1327,9 +1332,12 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.capp import build_stats as capp_build_stats, capp_log_probs
 from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
 _FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
+_CAPP_STATE = {'stats': None}
+
 _TTDC_STATE = {'preds': [], 'bias': None}
 
 def fda_lowfreq_match(src, tar, radius=0.1):
@@ -1422,6 +1430,12 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             if teacher is not None and args.eval_teacher and args.eval_mode == 'ensemble':
                 eval_logits = ensemble_logits
             eval_logits_batches.append(eval_logits.detach().cpu())
+            if getattr(args, 'capp', False) and _CAPP_STATE['stats'] is not None:
+                _lp = capp_log_probs(output, _CAPP_STATE['stats'],
+                                     float(args.capp_temperature)).to(eval_logits.device)
+                eval_logits = ((1.0 - float(args.capp_alpha)) * eval_logits
+                               + float(args.capp_alpha) * _lp)
+
             if getattr(args, 'spst', False):
                 _eps = float(args.spst_eps)
                 _k = int(args.spst_k)
@@ -1652,6 +1666,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             if ep == num_epoch and len(_TTDC_STATE['preds']) >= 2:
                 _TTDC_STATE['bias'] = build_bias(
                     _TTDC_STATE['preds'], num_classes, args.ttdc_gamma)
+
+        if ep == num_epoch and getattr(args, 'capp', False):
+            _CAPP_STATE['stats'] = capp_build_stats(
+                G, train_loader, num_classes, DEV, args.capp_shrink)
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
