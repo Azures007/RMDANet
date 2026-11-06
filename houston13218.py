@@ -281,6 +281,14 @@ def build_parser():
     ours_group.add_argument('--lscs_max_frac', default=0.60, type=float)
     ours_group.add_argument('--lscs_start_epoch', default=15, type=int)
     ours_group.add_argument('--lscs_fit_epochs', default=3, type=int)
+    ours_group.add_argument('--cfm', action='store_true', default=False,
+                            help='class-conditioned cross-domain feature mixing (CFM)')
+    ours_group.add_argument('--cfm_weight', default=0.10, type=float)
+    ours_group.add_argument('--cfm_lambda', default=0.5, type=float)
+    ours_group.add_argument('--cfm_conf', default=0.95, type=float)
+    ours_group.add_argument('--cfm_start_epoch', default=10, type=int)
+    ours_group.add_argument('--cfm_ramp_epochs', default=10, type=int)
+    ours_group.add_argument('--cfm_max_per_class', default=16, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -864,6 +872,25 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             target_labels=label_target_diag
         )
         all_loss = loss1 + loss2 + bnm_loss_a + contrastive_loss
+        if getattr(args, 'cfm', False) and ep >= int(getattr(args, 'cfm_start_epoch', 10)):
+            _cfm_w = get_rampup_weight(
+                ep, int(args.cfm_start_epoch), int(args.cfm_ramp_epochs), float(args.cfm_weight)
+            )
+            if _cfm_w > 0:
+                _mix = build_mixed_features(
+                    output, src_batch_size, target1,
+                    F1_pseudo_label_t, F1_pseudo_prob_t,
+                    output_t1.detach().argmax(dim=1), num_classes,
+                    lam=float(args.cfm_lambda),
+                    conf_thr=float(args.cfm_conf),
+                    max_per_class=int(args.cfm_max_per_class),
+                )
+                if _mix is not None:
+                    _mf, _my = _mix
+                    _cfm_out = F1(_mf)
+                    _cfm_logits = _cfm_out[0] if isinstance(_cfm_out, tuple) else _cfm_out
+                    all_loss = all_loss + _cfm_w * F.cross_entropy(_cfm_logits, _my)
+
 
         # ---- Ours: PATS-gated pseudo-label CE (M1) + source-prototype anchor (M3) ----
         ramp_fraction = get_rampup_weight(
@@ -1287,6 +1314,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.cfm import build_mixed_features
 _FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
 def fda_lowfreq_match(src, tar, radius=0.1):
     """Source phase + target low-frequency amplitude (per band), cube level.
