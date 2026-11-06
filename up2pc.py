@@ -289,6 +289,14 @@ def build_parser():
     ours_group.add_argument('--ttdc_gamma', default=0.5, type=float)
     ours_group.add_argument('--ttdc_epochs', default='10,20,30,40', type=str,
                             help='epochs whose target predictions form the trajectory')
+    ours_group.add_argument('--spst', action='store_true', default=False,
+                            help='spectral perturbation sensitivity test (inference only)')
+    ours_group.add_argument('--spst_eps', default=0.05, type=float,
+                            help='perturbation scale relative to the input std')
+    ours_group.add_argument('--spst_k', default=4, type=int,
+                            help='number of perturbed forward passes')
+    ours_group.add_argument('--spst_flip_thresh', default=0.5, type=float,
+                            help='flip-rate threshold to treat a pixel as unstable')
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1408,6 +1416,31 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             if teacher is not None and args.eval_teacher and args.eval_mode == 'ensemble':
                 eval_logits = ensemble_logits
             eval_logits_batches.append(eval_logits.detach().cpu())
+            if getattr(args, 'spst', False):
+                _eps = float(args.spst_eps)
+                _k = int(args.spst_k)
+                _p0 = torch.softmax(eval_logits.float(), dim=1)
+                _acc = torch.zeros_like(_p0)
+                _flip = torch.zeros(_p0.size(0), device=_p0.device)
+                with torch.no_grad():
+                    _std = data1.float().std().clamp_min(1e-6)
+                    for _ in range(_k):
+                        _noise = torch.randn_like(data1.float()) * (_std * _eps)
+                        _out, _ = G(data1.float() + _noise)
+                        _l1 = F1(_out)
+                        _l2 = F2(_out)
+                        if isinstance(_l1, tuple):
+                            _l1 = _l1[0]
+                        if isinstance(_l2, tuple):
+                            _l2 = _l2[0]
+                        _pk = torch.softmax((0.5 * (_l1 + _l2)).float(), dim=1)
+                        _acc += _pk
+                        _flip += (_pk.argmax(dim=1) != _p0.argmax(dim=1)).float()
+                _pavg = _acc / max(1, _k)
+                _unstable = (_flip / max(1, _k)) >= float(args.spst_flip_thresh)
+                _pf = torch.where(_unstable.unsqueeze(1), _pavg, _p0)
+                eval_logits = torch.log(_pf.clamp_min(1e-8))
+
             if getattr(args, 'ttdc', False) and _TTDC_STATE['bias'] is not None:
                 _off = len(predict_ensemble)
                 _bias = _TTDC_STATE['bias'][_off:_off + eval_logits.size(0)]
