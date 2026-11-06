@@ -144,3 +144,26 @@ def spatial_view(probs, coords, shape, passes=1):
     out /= out.sum(axis=1, keepdims=True)
     print(f"[mvlcr] spatial view built (passes={passes})")
     return out
+
+
+def dcm_views(x, crop_ratio=0.55):
+    """Deterministic multi-context versions of the same patch (no noise, no flip).
+
+    1. tight context: centre crop (crop_ratio of the patch) replicated to full size
+    2. wide context : 3x3 mean-smoothed patch (larger effective receptive field)
+    Returns a list of tensors with the same shape as x.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    B, C, H, W = x.shape
+    k = max(3, int(round(H * float(crop_ratio))), int(round(W * float(crop_ratio))))
+    k = min(k, H, W)
+    top = (H - k) // 2
+    left = (W - k) // 2
+    crop = x[:, :, top:top + k, left:left + k]
+    pad_h, pad_w = H - k, W - k
+    tight = F.pad(crop, (pad_w // 2, pad_w - pad_w // 2,
+                         pad_h // 2, pad_h - pad_h // 2), mode="replicate")
+    wide = F.avg_pool2d(x, kernel_size=3, stride=1, padding=1)
+    return [tight, wide]

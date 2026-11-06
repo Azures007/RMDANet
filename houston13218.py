@@ -327,6 +327,8 @@ def build_parser():
                             help='only overwrite pixels whose original confidence is below this value')
     ours_group.add_argument('--mvlcr_spatial', default=1, type=int,
                             help='use the neighbourhood-averaged view as a fourth view')
+    ours_group.add_argument('--mvlcr_dcm', default=1, type=int,
+                            help='use deterministic multi-context views (tight/wide) as extra views')
     ours_group.add_argument('--mvlcr_iters', default=5, type=int)
     ours_group.add_argument('--tmsa', action='store_true', default=False,
                             help='target masked spectral adapter with source anchoring (test-time)')
@@ -1361,7 +1363,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 from modules.ssti import refine_labels
 from modules.tmsa import adapt as tmsa_adapt
-from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view
+from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
 from modules.capp import build_stats as capp_build_stats, capp_log_probs
 from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
@@ -1442,6 +1444,7 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
     outputdata = []
     _mv_p1 = []
     _mv_p2 = []
+    _mv_pd = []
     eval_logits_batches = []
     with torch.no_grad():
         for data, target in test_loader:
@@ -1507,6 +1510,15 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             if getattr(args, 'mvlcr', False):
                 _mv_p1.append(torch.softmax(logits1.float(), dim=1).cpu().numpy())
                 _mv_p2.append(torch.softmax(logits2.float(), dim=1).cpu().numpy())
+                if int(getattr(args, 'mvlcr_dcm', 1)) > 0:
+                    with torch.no_grad():
+                        for _v in dcm_views(data1):
+                            _ov, _ = G(_v)
+                            _lv = F1(_ov)
+                            if isinstance(_lv, tuple):
+                                _lv = _lv[0]
+                            _mv_pd.append(torch.softmax(_lv.float(), dim=1).cpu().numpy())
+
             pred1 = logits1.data.max(1)[1]
             pred2 = logits2.data.max(1)[1]
             pred_ensemble = ensemble_logits.data.max(1)[1]
@@ -1548,6 +1560,9 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
                 _mvlcr_prior_hat = _np.power(_mvlcr_prior_hat + 1e-12, _beta)
                 _mvlcr_prior_hat = _mvlcr_prior_hat / _mvlcr_prior_hat.sum()
             _views = [_p1, _p2, _MVLCR_STATE['spec']]
+            if int(getattr(args, 'mvlcr_dcm', 1)) > 0 and len(_mv_pd) > 0:
+                for _k in range(len(_mv_pd) // max(1, len(_mv_p1))):
+                    _views.append(_np.concatenate(_mv_pd[_k::2], axis=0))
             if (_MVLCR_STATE.get('coords') is not None
                     and int(getattr(args, 'mvlcr_spatial', 1)) > 0):
                 _views.append(spatial_view(_p1, _MVLCR_STATE['coords'],
