@@ -341,6 +341,11 @@ def build_parser():
                             help='TENT-style BN-affine entropy minimisation on the unlabeled target')
     ours_group.add_argument('--tent_steps', default=10, type=int)
     ours_group.add_argument('--tent_lr', default=1e-3, type=float)
+    ours_group.add_argument('--ratc', action='store_true', default=False,
+                            help='reliability-aware test-time correction: diagnose BN shift, then TENT or MV-LCR')
+    ours_group.add_argument('--ratc_thresh', default=0.35, type=float)
+    ours_group.add_argument('--ratc_tent_steps', default=20, type=int)
+    ours_group.add_argument('--ratc_probe_batches', default=6, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1366,6 +1371,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.ratc import diagnose as ratc_diagnose
 from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
@@ -1806,6 +1812,17 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
 
         if getattr(args, 'tent', False) and ep == num_epoch:
             tent_adapt(G, F1, F2, test_loader, DEV, args)
+
+        if getattr(args, 'ratc', False) and ep == num_epoch:
+            _shift, _choice = ratc_diagnose(
+                G, F1, F2, test_loader, DEV,
+                threshold=float(args.ratc_thresh),
+                n_batches=int(args.ratc_probe_batches))
+            if _choice == 'tent':
+                args.tent_steps = int(args.ratc_tent_steps)
+                tent_adapt(G, F1, F2, test_loader, DEV, args)
+            else:
+                args.mvlcr = True
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
