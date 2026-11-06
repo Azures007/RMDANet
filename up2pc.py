@@ -316,6 +316,8 @@ def build_parser():
                             help='flatten (<1) the target prior used for projection to protect minority classes')
     ours_group.add_argument('--mvlcr_gate', default='none', choices=['none', 'disagree'],
                             help='disagree: only overwrite pixels where the views disagree')
+    ours_group.add_argument('--mvlcr_blend', default=1.0, type=float,
+                            help='soft blending weight: p = (1-a)*p_orig + a*p_mvlcr')
     ours_group.add_argument('--mvlcr_iters', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
@@ -1539,6 +1541,11 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                           & (_p1.argmax(axis=1) == _MVLCR_STATE['spec'].argmax(axis=1)))
                 _mv_post = _np.where(_agree, _orig, _mv_post)
                 print(f'[mvlcr] gate=disagree: kept {float(_agree.mean())*100:.1f}% pixels unchanged')
+            _blend = float(getattr(args, 'mvlcr_blend', 1.0))
+            if _blend < 1.0:
+                _p_blend = (1.0 - _blend) * _p1 + _blend * _post
+                _mv_post = _p_blend.argmax(axis=1)
+                print(f'[mvlcr] soft blend alpha={_blend:.2f}')
             _mv_change = float((_mv_post != _p1.argmax(axis=1)).mean())
             print(f'[mvlcr] change ratio vs F1 predictions: {_mv_change*100:.2f}%')
             predict_ensemble = _mv_post
