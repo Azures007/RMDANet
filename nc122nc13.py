@@ -1355,10 +1355,16 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             import numpy as _np
             _p1 = _np.concatenate(_mv_p1, axis=0)
             _p2 = _np.concatenate(_mv_p2, axis=0)
+            _nc = int(_MVLCR_STATE.get('num_classes', 7))
+            # target prior estimated from the model's own prediction histogram
+            # (the source prior is uniform and does NOT hold on the target scene)
+            _mvlcr_prior_hat = _np.bincount(
+                _p1.argmax(axis=1), minlength=_nc).astype(_np.float64)
+            _mvlcr_prior_hat = _mvlcr_prior_hat / max(1.0, _mvlcr_prior_hat.sum())
             _post = fit_mvlcr([_p1, _p2, _MVLCR_STATE['spec']],
-                              _MVLCR_STATE.get('num_classes', 7),
+                              _nc,
                               iters=args.mvlcr_iters,
-                              prior=_MVLCR_STATE.get('prior', None),
+                              prior=_mvlcr_prior_hat,
                               fix_prior=bool(getattr(args, 'mvlcr_fix_prior', 1)))
             predict_ensemble = _post.argmax(axis=1)
             acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
