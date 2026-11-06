@@ -337,6 +337,10 @@ def build_parser():
     ours_group.add_argument('--tmsa_rank', default=16, type=int)
     ours_group.add_argument('--tmsa_mask', default=8, type=int)
     ours_group.add_argument('--tmsa_anchor', default=1e-4, type=float)
+    ours_group.add_argument('--tent', action='store_true', default=False,
+                            help='TENT-style BN-affine entropy minimisation on the unlabeled target')
+    ours_group.add_argument('--tent_steps', default=10, type=int)
+    ours_group.add_argument('--tent_lr', default=1e-3, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1362,6 +1366,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
 from modules.capp import build_stats as capp_build_stats, capp_log_probs
@@ -1798,6 +1803,9 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
 
         if getattr(args, 'tmsa', False) and ep == num_epoch:
             _G_EVAL = tmsa_adapt(G, test_loader, DEV, args)
+
+        if getattr(args, 'tent', False) and ep == num_epoch:
+            tent_adapt(G, F1, F2, test_loader, DEV, args)
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
