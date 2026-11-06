@@ -257,6 +257,11 @@ def build_parser():
     ours_group.add_argument('--cfm_start_epoch', default=10, type=int)
     ours_group.add_argument('--cfm_ramp_epochs', default=10, type=int)
     ours_group.add_argument('--cfm_max_per_class', default=16, type=int)
+    ours_group.add_argument('--ttdc', action='store_true', default=False,
+                            help='temporal trajectory disagreement correction (inference only)')
+    ours_group.add_argument('--ttdc_gamma', default=0.5, type=float)
+    ours_group.add_argument('--ttdc_epochs', default='10,20,30,40', type=str,
+                            help='epochs whose target predictions form the trajectory')
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1150,8 +1155,11 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
 
 
 from modules.ssti import refine_labels
+from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
 _FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
+_TTDC_STATE = {'preds': [], 'bias': None}
+
 def fda_lowfreq_match(src, tar, radius=0.1):
     """Source phase + target low-frequency amplitude (per band), cube level.
 
@@ -1242,6 +1250,10 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             if teacher is not None and args.eval_teacher and args.eval_mode == 'ensemble':
                 eval_logits = ensemble_logits
             eval_logits_batches.append(eval_logits.detach().cpu())
+            if getattr(args, 'ttdc', False) and _TTDC_STATE['bias'] is not None:
+                _off = len(predict_ensemble)
+                _bias = _TTDC_STATE['bias'][_off:_off + eval_logits.size(0)]
+                eval_logits = eval_logits + eval_logits.new_tensor(_bias)
             test_loss += F.cross_entropy(eval_logits, target1.long(), reduction='sum').item()
 
             pred1 = logits1.data.max(1)[1]
@@ -1401,6 +1413,16 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             _wanted = [int(x) for x in str(getattr(args, 'm1_dump_epochs', '') or '').split(',') if x.strip()]
             if (ep in _wanted) or (not _wanted and ep == num_epoch):
                 _diag_flush(os.path.join(args.m1_dump, f"dump_seed{seed}_ep{ep}.npz"))
+        if getattr(args, 'ttdc', False):
+            _ttdc_eps = [int(x) for x in str(args.ttdc_epochs).split(',') if x.strip()]
+            if ep in _ttdc_eps:
+                _TTDC_STATE['preds'].append(
+                    collect_predictions(G, F1, F2, test_loader, DEV, args.eval_mode))
+                print(f'[ttdc] collected trajectory prediction at epoch {ep}')
+            if ep == num_epoch and len(_TTDC_STATE['preds']) >= 2:
+                _TTDC_STATE['bias'] = build_bias(
+                    _TTDC_STATE['preds'], num_classes, args.ttdc_gamma)
+
         if ep % num_epoch == 0:
             epoch_test_start = time.time()
             test_result = test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_context=ssti_context, teacher=F1_teacher)
