@@ -70,6 +70,13 @@ def fit_mvlcr(view_probs, num_classes=None, iters=30, eps=1e-3,
         logp -= logp.max(axis=1, keepdims=True)
         new_post = np.exp(logp)
         new_post /= np.maximum(new_post.sum(axis=1, keepdims=True), 1e-12)
+        if fixed_pi is not None:
+            # IPF projection: force the marginal class distribution back to the
+            # source prior, so minority classes cannot be absorbed by the EM.
+            for _ in range(5):
+                col = new_post.sum(axis=0)
+                new_post *= (fixed_pi * len(new_post)) / np.maximum(col, 1e-12)
+                new_post /= np.maximum(new_post.sum(axis=1, keepdims=True), 1e-12)
         delta = np.abs(new_post - post).mean()
         post = new_post
         if delta < 1e-6:
