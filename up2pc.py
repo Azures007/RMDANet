@@ -347,6 +347,12 @@ def build_parser():
     ours_group.add_argument('--cns_ratio', default=0.75, type=float,
                             help='fraction of each class kept for contrastive distillation')
     ours_group.add_argument('--cns_min_per_class', default=1, type=int)
+    ours_group.add_argument('--cat', action='store_true', default=False,
+                            help='consensus anchor teacher: teacher+student consensus pseudo labels')
+    ours_group.add_argument('--rwd', action='store_true', default=False,
+                            help='reliability-weighted discrepancy loss')
+    ours_group.add_argument('--tar', action='store_true', default=False,
+                            help='tail-aware entropy regulariser replacing BNM')
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -841,6 +847,25 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         F1_teacher.update_weights(G, F1, ep * num_iter + batch_idx)
         F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t, teacher_proj_t = F1_teacher(data2)
 
+        # ---- CAT: consensus anchor (teacher + dual student) ----
+        if getattr(args, 'cat', False):
+            with torch.no_grad():
+                _o, _ = G(data2)
+                _s1 = F1(_o)
+                _s2 = F2(_o)
+                if isinstance(_s1, tuple):
+                    _s1 = _s1[0]
+                if isinstance(_s2, tuple):
+                    _s2 = _s2[0]
+                _student_prob = 0.5 * (torch.softmax(_s1.float(), dim=1)
+                                       + torch.softmax(_s2.float(), dim=1))
+                _t_logits, _ = F1_teacher.f(teacher_feat_t)
+                _teacher_prob = torch.softmax(_t_logits.float(), dim=1)
+                _consensus = 0.5 * (_student_prob + _teacher_prob)
+                F1_pseudo_prob_t = _consensus.max(dim=1).values
+                F1_pseudo_label_t = _consensus.argmax(dim=1).long()
+
+
         _, _, teacher_feat_s, teacher_proj_s = F1_teacher(data1)
         _, student_proj_s = G(data1)
         contrastive_loss_s = args.source_contrastive_weight * compute_projection_contrastive_loss(
@@ -919,6 +944,10 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         bnm_loss_a, output_t1_prob, output_t2_prob = compute_bnm_loss(
             output_t1, output_t2, get_bnm_weight(ep, 'A', args)
         )
+        if getattr(args, 'tar', False):
+            _p = torch.softmax(output_t1.detach().float(), dim=1).mean(dim=0)
+            _tail = -(torch.log(_p.clamp_min(1e-6)) * (1.0 - _p)).mean()
+            bnm_loss_a = get_bnm_weight(ep, 'A', args) * _tail
         update_target_diagnostic_state(
             target_diagnostic_state,
             F1_pseudo_label_t,
@@ -1348,7 +1377,12 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         loss1 = criterion(output_s1, target1.long())
         loss2 = criterion(output_s2, target1.long())
 
-        loss_dis = torch.mean(torch.abs(output_t1_prob - output_t2_prob))
+        if getattr(args, 'rwd', False):
+            _rel = F1_pseudo_prob_t.view(-1).float()
+            _w = (_rel / _rel.mean().clamp_min(1e-6)).clamp(1e-2, 3.0)
+            loss_dis = (torch.abs(output_t1_prob - output_t2_prob).mean(dim=1) * _w).mean()
+        else:
+            loss_dis = torch.mean(torch.abs(output_t1_prob - output_t2_prob))
         F_loss = loss1 + loss2 - eta * loss_dis + bnm_loss_b
         if args.log_results:
             wandb.log({f'{seed}_B_loss': F_loss})
@@ -1369,7 +1403,12 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             bnm_loss_c, output_t1_prob, output_t2_prob = compute_bnm_loss(
                 output_t1, output_t2, get_bnm_weight(ep, 'C', args)
             )
-            loss_dis = torch.mean(torch.abs(output_t1_prob - output_t2_prob))
+            if getattr(args, 'rwd', False):
+                _rel = F1_pseudo_prob_t.view(-1).float()
+                _w = (_rel / _rel.mean().clamp_min(1e-6)).clamp(1e-2, 3.0)
+                loss_dis = (torch.abs(output_t1_prob - output_t2_prob).mean(dim=1) * _w).mean()
+            else:
+                loss_dis = torch.mean(torch.abs(output_t1_prob - output_t2_prob))
             loss_g = loss_dis + bnm_loss_c
 
             if args.log_results:
