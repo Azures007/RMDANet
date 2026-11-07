@@ -400,9 +400,51 @@ def select_target_contrastive_samples(
     ranking_scores=None,
     per_class_topk=None,
     prototype_filter_projections=None,
-    source_prototype_state=None
+    source_prototype_state=None,
+    verified_mask=None
 ):
     selection_mode = get_target_contrastive_selection_mode(args)
+
+    # ---- PCV: pair-level consensus verification ----
+    # Only samples where teacher == F1 == F2 (and confidence is high) may form
+    # positive pairs, which removes the positive-pair contamination that makes
+    # pseudo-label errors accumulate in target contrastive distillation.
+    if getattr(args, 'pcv', False) and verified_mask is not None:
+        import torch as _torch
+        ratio = float(getattr(args, 'pcv_ratio', 0.75))
+        _labels_t = _torch.as_tensor(pseudo_labels)
+        _ver = _torch.as_tensor(verified_mask).bool()
+        _cand = _ver.nonzero(as_tuple=True)[0]
+        keep = []
+        for _c in range(int(num_classes)):
+            _idx = _cand[_labels_t[_cand] == _c]
+            if _idx.numel() == 0:
+                continue
+            _k = max(1, int(round(ratio * float(_idx.numel()))))
+            _k = min(_k, int(_idx.numel()))
+            _sel = _idx[_torch.topk(pseudo_probs[_idx], _k).indices]
+            keep.append(_sel)
+        if keep:
+            selected_indices = _torch.cat(keep).long()
+        else:
+            selected_indices = _labels_t.new_empty((0,), dtype=_torch.long)
+        selected_indices = filter_target_contrastive_pairs(
+            selected_indices, pseudo_labels, num_classes)
+        selected_per_class = summarize_selected_target_classes(
+            selected_indices, pseudo_labels, num_classes)
+        metadata = {
+            'threshold': 0.0,
+            'selection_mode': 'pcv',
+            'selected_per_class': selected_per_class,
+            'selected_classes': int(sum(count > 0 for count in selected_per_class)),
+            'prototype_filter': 'off',
+            'prototype_before': int(selected_indices.numel()),
+            'prototype_after': int(selected_indices.numel()),
+            'prototype_keep_rate': 1.0,
+            'prototype_valid_classes': 0,
+        }
+        return selected_indices, metadata
+
 
     # ---- CNS: consensus-neighbourhood selection replacing the PATS pipeline ----
     # Keep a class-balanced fraction of the target samples chosen by teacher
@@ -493,7 +535,8 @@ def compute_target_contrastive_loss(
     per_class_topk=None,
     prototype_filter_projections=None,
     source_prototype_state=None,
-    return_indices=False
+    return_indices=False,
+    verified_mask=None
 ):
     weight = get_target_contrastive_weight(ep, args)
     zero = student_proj.new_tensor(0.0)
@@ -540,7 +583,8 @@ def compute_target_contrastive_loss(
         ranking_scores=ranking_scores,
         per_class_topk=per_class_topk,
         prototype_filter_projections=prototype_filter_projections,
-        source_prototype_state=source_prototype_state
+        source_prototype_state=source_prototype_state,
+        verified_mask=verified_mask
     )
     stats['threshold'] = selection_metadata['threshold']
     stats['selection_mode'] = selection_metadata['selection_mode']

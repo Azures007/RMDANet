@@ -360,6 +360,10 @@ def build_parser():
                             help='reliability-weighted discrepancy loss')
     ours_group.add_argument('--tar', action='store_true', default=False,
                             help='tail-aware entropy regulariser replacing BNM')
+    ours_group.add_argument('--pcv', action='store_true', default=False,
+                            help='pair-level consensus verification for contrastive positives')
+    ours_group.add_argument('--pcv_ratio', default=0.75, type=float)
+    ours_group.add_argument('--pcv_conf', default=0.95, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -917,6 +921,22 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     ep,
                     args
                 )
+        _pcv_mask = None
+        if getattr(args, 'pcv', False):
+            with torch.no_grad():
+                _po, _ = G(data2)
+                _ps1 = F1(_po)
+                _ps2 = F2(_po)
+                if isinstance(_ps1, tuple):
+                    _ps1 = _ps1[0]
+                if isinstance(_ps2, tuple):
+                    _ps2 = _ps2[0]
+                _tpred = F1_pseudo_label_t.view(-1).long()
+                _tconf = F1_pseudo_prob_t.view(-1).float()
+                _pcv_mask = (_ps1.argmax(dim=1).eq(_tpred)
+                             & _ps2.argmax(dim=1).eq(_tpred)
+                             & (_tconf >= float(args.pcv_conf)))
+
         contrastive_loss_t, target_contrastive_stats = compute_target_contrastive_loss(
             teacher_proj_t,
             student_proj_t,
@@ -929,7 +949,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             per_class_topk=dynamic_class_topk,
             prototype_filter_projections=teacher_proj_t,
             source_prototype_state=source_prototype_state,
-            return_indices=True
+            return_indices=True,
+            verified_mask=_pcv_mask,
         )
         target_contrastive_stats.update(quota_stats)
         contrastive_loss = contrastive_loss_s + contrastive_loss_t
