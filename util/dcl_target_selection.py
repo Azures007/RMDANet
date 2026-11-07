@@ -1,5 +1,6 @@
 """Target pseudo-label selection, quota adaptation, and prototype scoring."""
 
+from modules.softtacd import soft_relation_contrastive
 import torch
 import torch.nn.functional as F
 
@@ -615,7 +616,8 @@ def compute_target_contrastive_loss(
     prototype_filter_projections=None,
     source_prototype_state=None,
     return_indices=False,
-    verified_mask=None
+    verified_mask=None,
+    teacher_prob=None
 ):
     weight = get_target_contrastive_weight(ep, args)
     zero = student_proj.new_tensor(0.0)
@@ -697,6 +699,15 @@ def compute_target_contrastive_loss(
         )
     if selected_indices.numel() < args.target_contrast_min_samples:
         return zero, stats
+
+    if getattr(args, 'softtacd', False) and teacher_prob is not None:
+        target_contrastive = soft_relation_contrastive(
+            student_proj[selected_indices],
+            teacher_prob[selected_indices],
+            temperature=float(getattr(args, 'softtacd_temp', 0.1)),
+            max_pos_mass=float(getattr(args, 'softtacd_mass', 1.0)),
+        )
+        return weight * selected_probs.mean() * target_contrastive, stats
 
     selected_labels = pseudo_labels[selected_indices]
     target_contrastive = compute_projection_contrastive_loss(

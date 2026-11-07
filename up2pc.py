@@ -369,6 +369,10 @@ def build_parser():
     ours_group.add_argument('--dta_momentum', default=0.999, type=float)
     ours_group.add_argument('--dta_ratio', default=0.75, type=float)
     ours_group.add_argument('--dta_warmup', default=5, type=int)
+    ours_group.add_argument('--softtacd', action='store_true', default=False,
+                            help='soft-relation positive pairs in target contrastive distillation')
+    ours_group.add_argument('--softtacd_temp', default=0.1, type=float)
+    ours_group.add_argument('--softtacd_mass', default=1.0, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -976,6 +980,14 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                     else:
                         _bs.data.copy_(_bf.data)
 
+        _teacher_prob = None
+        if getattr(args, 'softtacd', False):
+            with torch.no_grad():
+                _tl, _ = F1_teacher.f(teacher_feat_t)
+                if isinstance(_tl, tuple):
+                    _tl = _tl[0]
+                _teacher_prob = torch.softmax(_tl.float(), dim=1)
+
         contrastive_loss_t, target_contrastive_stats = compute_target_contrastive_loss(
             teacher_proj_t,
             student_proj_t,
@@ -991,6 +1003,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             return_indices=True,
             verified_mask=(_pcv_mask if getattr(args, 'pcv', False)
                            else (_stab_mask if getattr(args, 'stab', False) else _dta_mask)),
+            teacher_prob=_teacher_prob
         )
         target_contrastive_stats.update(quota_stats)
         contrastive_loss = contrastive_loss_s + contrastive_loss_t
