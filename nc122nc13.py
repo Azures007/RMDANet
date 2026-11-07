@@ -332,6 +332,11 @@ def build_parser():
                             help='pair-level consensus verification for contrastive positives')
     ours_group.add_argument('--pcv_ratio', default=0.75, type=float)
     ours_group.add_argument('--pcv_conf', default=0.95, type=float)
+    ours_group.add_argument('--stab', action='store_true', default=False,
+                            help='stability-gated positive pairs for contrastive distillation')
+    ours_group.add_argument('--stab_k', default=3, type=int)
+    ours_group.add_argument('--stab_ratio', default=0.75, type=float)
+    ours_group.add_argument('--stab_warmup', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -814,6 +819,23 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                              & _ps2.argmax(dim=1).eq(_tpred)
                              & (_tconf >= float(args.pcv_conf)))
 
+        _stab_mask = None
+        if getattr(args, 'stab', False) and ep > int(args.stab_warmup):
+            with torch.no_grad():
+                _tpred_np = F1_pseudo_label_t.view(-1).long().cpu().numpy()
+                _ids_np = target_ids.detach().cpu().numpy() if hasattr(target_ids, 'detach') else np.asarray(target_ids)
+                for _pos, _sid in enumerate(_ids_np.tolist()):
+                    _lb = int(_tpred_np[_pos])
+                    if _STAB_STATE['last'].get(_sid, -1) == _lb:
+                        _STAB_STATE['streak'][_sid] = _STAB_STATE['streak'].get(_sid, 0) + 1
+                    else:
+                        _STAB_STATE['streak'][_sid] = 1
+                    _STAB_STATE['last'][_sid] = _lb
+                _stab_mask = torch.tensor(
+                    [_STAB_STATE['streak'].get(int(_sid), 0) >= int(args.stab_k)
+                     for _sid in _ids_np.tolist()],
+                    dtype=torch.bool, device=F1_pseudo_label_t.device)
+
         contrastive_loss_t, target_contrastive_stats = compute_target_contrastive_loss(
             teacher_proj_t,
             student_proj_t,
@@ -827,7 +849,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             prototype_filter_projections=teacher_proj_t,
             source_prototype_state=source_prototype_state,
             return_indices=True,
-            verified_mask=_pcv_mask,
+            verified_mask=(_pcv_mask if getattr(args, 'pcv', False) else _stab_mask),
         )
         target_contrastive_stats.update(quota_stats)
         contrastive_loss = contrastive_loss_s + contrastive_loss_t
@@ -1312,6 +1334,8 @@ from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
 _FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
 _MVLCR_STATE = {'spec': None}
+_STAB_STATE = {'last': {}, 'streak': {}}
+
 
 _CAPP_STATE = {'stats': None}
 
@@ -1676,6 +1700,8 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     epoch_test_start = epoch_train_start
     epoch_test_end = epoch_train_start
     rcs_reset()
+    _STAB_STATE['last'].clear()
+    _STAB_STATE['streak'].clear()
     lscs_reset(num_classes)
     _TTDC_STATE['preds'].clear()
     _TTDC_STATE['bias'] = None
