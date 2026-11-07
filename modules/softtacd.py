@@ -16,7 +16,7 @@ from __future__ import annotations
 
 
 def soft_relation_contrastive(student_proj, teacher_prob, temperature=0.1, eps=1e-8,
-                              max_pos_mass=1.0):
+                              max_pos_mass=1.0, hybrid_beta=0.0):
     """Soft-label SupCon style loss.
 
     student_proj: (N, D) student projections of the selected target samples
@@ -30,8 +30,14 @@ def soft_relation_contrastive(student_proj, teacher_prob, temperature=0.1, eps=1
     n = sim.size(0)
     mask = ~torch.eye(n, dtype=torch.bool, device=sim.device)
 
-    q = torch.matmul(teacher_prob, teacher_prob.t()).clamp_min(0.0)
-    q = q * mask
+    q_soft = torch.matmul(teacher_prob, teacher_prob.t()).clamp_min(0.0)
+    beta = float(hybrid_beta)
+    if beta > 0.0:
+        _pred = teacher_prob.argmax(dim=1)
+        hard = (_pred[:, None] == _pred[None, :]).float()
+        q = (1.0 - beta) * (hard * mask) + beta * q_soft * mask
+    else:
+        q = q_soft * mask
     row_sum = q.sum(dim=1, keepdim=True).clamp_min(eps)
     if max_pos_mass is not None and float(max_pos_mass) > 0:
         q = q / row_sum * float(max_pos_mass)

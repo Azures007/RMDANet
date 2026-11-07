@@ -706,6 +706,7 @@ def compute_target_contrastive_loss(
             teacher_prob[selected_indices],
             temperature=float(getattr(args, 'softtacd_temp', 0.1)),
             max_pos_mass=float(getattr(args, 'softtacd_mass', 1.0)),
+            hybrid_beta=float(getattr(args, 'softtacd_hybrid', 0.0)),
         )
         return weight * selected_probs.mean() * target_contrastive, stats
 

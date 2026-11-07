@@ -345,6 +345,8 @@ def build_parser():
     ours_group.add_argument('--softtacd', action='store_true', default=False,
                             help='soft-relation positive pairs in target contrastive distillation')
     ours_group.add_argument('--softtacd_temp', default=0.1, type=float)
+    ours_group.add_argument('--softtacd_hybrid', default=0.0, type=float,
+                            help='blend hard pseudo-label pairs (0) with soft relation weights (1)')
     ours_group.add_argument('--softtacd_mass', default=1.0, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
