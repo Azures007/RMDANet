@@ -16,7 +16,7 @@ from __future__ import annotations
 
 
 def soft_relation_contrastive(student_proj, teacher_prob, temperature=0.1, eps=1e-8,
-                              max_pos_mass=1.0, hybrid_beta=0.0):
+                              max_pos_mass=1.0, hybrid_beta=0.0, sample_weight=None):
     """Soft-label SupCon style loss.
 
     student_proj: (N, D) student projections of the selected target samples
@@ -38,6 +38,9 @@ def soft_relation_contrastive(student_proj, teacher_prob, temperature=0.1, eps=1
         q = (1.0 - beta) * (hard * mask) + beta * q_soft * mask
     else:
         q = q_soft * mask
+    if sample_weight is not None:
+        w = sample_weight.view(-1).clamp_min(0.0)
+        q = q * w[:, None] * w[None, :]
     row_sum = q.sum(dim=1, keepdim=True).clamp_min(eps)
     if max_pos_mass is not None and float(max_pos_mass) > 0:
         q = q / row_sum * float(max_pos_mass)

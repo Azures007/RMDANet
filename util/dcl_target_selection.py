@@ -654,19 +654,36 @@ def compute_target_contrastive_loss(
         args,
         num_classes
     )
-    selected_indices, selection_metadata = select_target_contrastive_samples(
-        pseudo_labels,
-        pseudo_probs,
-        ep,
-        args,
-        num_classes,
-        selection_scores=selection_scores,
-        ranking_scores=ranking_scores,
-        per_class_topk=per_class_topk,
-        prototype_filter_projections=prototype_filter_projections,
-        source_prototype_state=source_prototype_state,
-        verified_mask=verified_mask
-    )
+    if getattr(args, 'sfdsiw', False):
+        import torch as _t
+        selected_indices = _t.arange(int(pseudo_labels.shape[0]),
+                                     device=pseudo_labels.device)
+        selection_metadata = {
+            'threshold': 0.0,
+            'selection_mode': 'sfdsiw',
+            'selected_per_class': summarize_selected_target_classes(
+                selected_indices, pseudo_labels, num_classes),
+            'selected_classes': num_classes,
+            'prototype_filter': 'off',
+            'prototype_before': int(selected_indices.numel()),
+            'prototype_after': int(selected_indices.numel()),
+            'prototype_keep_rate': 1.0,
+            'prototype_valid_classes': 0,
+        }
+    else:
+        selected_indices, selection_metadata = select_target_contrastive_samples(
+            pseudo_labels,
+            pseudo_probs,
+            ep,
+            args,
+            num_classes,
+            selection_scores=selection_scores,
+            ranking_scores=ranking_scores,
+            per_class_topk=per_class_topk,
+            prototype_filter_projections=prototype_filter_projections,
+            source_prototype_state=source_prototype_state,
+            verified_mask=verified_mask
+        )
     stats['threshold'] = selection_metadata['threshold']
     stats['selection_mode'] = selection_metadata['selection_mode']
     stats['selected'] = int(selected_indices.numel())
@@ -700,13 +717,21 @@ def compute_target_contrastive_loss(
     if selected_indices.numel() < args.target_contrast_min_samples:
         return zero, stats
 
-    if getattr(args, 'softtacd', False) and teacher_prob is not None:
+    if (getattr(args, 'softtacd', False) or getattr(args, 'alsplg', False)
+            or getattr(args, 'sfdsiw', False)) and teacher_prob is not None:
+        _sw = None
+        if getattr(args, 'sfdsiw', False):
+            import torch as _t
+            _c = pseudo_probs[selected_indices].float()
+            _med = _c.median()
+            _sw = _t.sigmoid(float(getattr(args, 'sfdsiw_alpha', 2.0)) * (_c - _med))
         target_contrastive = soft_relation_contrastive(
             student_proj[selected_indices],
             teacher_prob[selected_indices],
             temperature=float(getattr(args, 'softtacd_temp', 0.1)),
             max_pos_mass=float(getattr(args, 'softtacd_mass', 1.0)),
             hybrid_beta=float(getattr(args, 'softtacd_hybrid', 0.0)),
+            sample_weight=_sw,
         )
         return weight * selected_probs.mean() * target_contrastive, stats
 

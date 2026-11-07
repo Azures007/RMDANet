@@ -375,6 +375,17 @@ def build_parser():
     ours_group.add_argument('--softtacd_hybrid', default=0.0, type=float,
                             help='blend hard pseudo-label pairs (0) with soft relation weights (1)')
     ours_group.add_argument('--softtacd_mass', default=1.0, type=float)
+    ours_group.add_argument('--alsplg', action='store_true', default=False,
+                            help='adaptive label smoothing for pseudo labels (PS-RDA #1)')
+    ours_group.add_argument('--als_eps', default=0.1, type=float)
+    ours_group.add_argument('--als_beta', default=1.0, type=float)
+    ours_group.add_argument('--sfdsiw', action='store_true', default=False,
+                            help='soft filtering with continuous sample weights (PS-RDA #2)')
+    ours_group.add_argument('--sfdsiw_alpha', default=2.0, type=float)
+    ours_group.add_argument('--aasm', action='store_true', default=False,
+                            help='adaptive alignment strength modulation (PS-RDA #3)')
+    ours_group.add_argument('--aasm_base', default=1.0, type=float)
+    ours_group.add_argument('--aasm_gamma', default=1.0, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -868,6 +879,13 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
         target1 = Variable(target1)
         F1_teacher.update_weights(G, F1, ep * num_iter + batch_idx)
         F1_pseudo_label_t, F1_pseudo_prob_t, teacher_feat_t, teacher_proj_t = F1_teacher(data2)
+        _aasm = 1.0
+        if getattr(args, 'aasm', False):
+            _conf = F1_pseudo_prob_t.view(-1).float().mean()
+            _prog = 1.0 if ep <= 20 else (0.5 if ep <= 40 else 0.2)
+            _d = torch.exp(-float(args.aasm_gamma) * (1.0 - _conf))
+            _aasm = float(args.aasm_base) * _prog * float(_d)
+
 
         # ---- CAT: consensus anchor (teacher + dual student) ----
         if getattr(args, 'cat', False):
@@ -983,12 +1001,19 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                         _bs.data.copy_(_bf.data)
 
         _teacher_prob = None
-        if getattr(args, 'softtacd', False):
+        if getattr(args, 'softtacd', False) or getattr(args, 'alsplg', False) or getattr(args, 'sfdsiw', False):
             with torch.no_grad():
                 _tl, _ = F1_teacher.f(teacher_feat_t)
                 if isinstance(_tl, tuple):
                     _tl = _tl[0]
                 _teacher_prob = torch.softmax(_tl.float(), dim=1)
+                if getattr(args, 'alsplg', False):
+                    _pmax = _teacher_prob.max(dim=1, keepdim=True).values
+                    _eps = (float(args.als_eps)
+                            * (1.0 + float(args.als_beta) * (1.0 - _pmax))).clamp_max(0.5)
+                    _teacher_prob = ((1.0 - _eps) * _teacher_prob
+                                     + _eps * (1.0 / float(_teacher_prob.shape[1])))
+
 
         contrastive_loss_t, target_contrastive_stats = compute_target_contrastive_loss(
             teacher_proj_t,
@@ -1040,7 +1065,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             logits_t2=output_t2,
             target_labels=label_target_diag,
         )
-        all_loss = loss1 + loss2 + bnm_loss_a + contrastive_loss
+        all_loss = loss1 + loss2 + _aasm * bnm_loss_a + contrastive_loss
         if getattr(args, 'cfm', False) and ep >= int(getattr(args, 'cfm_start_epoch', 10)):
             _cfm_w = get_rampup_weight(
                 ep, int(args.cfm_start_epoch), int(args.cfm_ramp_epochs), float(args.cfm_weight)
@@ -1466,7 +1491,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             loss_dis = (torch.abs(output_t1_prob - output_t2_prob).mean(dim=1) * _w).mean()
         else:
             loss_dis = torch.mean(torch.abs(output_t1_prob - output_t2_prob))
-        F_loss = loss1 + loss2 - eta * loss_dis + bnm_loss_b
+        F_loss = loss1 + loss2 - (eta * _aasm) * loss_dis + _aasm * bnm_loss_b
         if args.log_results:
             wandb.log({f'{seed}_B_loss': F_loss})
         F_loss.backward()
@@ -1492,7 +1517,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                 loss_dis = (torch.abs(output_t1_prob - output_t2_prob).mean(dim=1) * _w).mean()
             else:
                 loss_dis = torch.mean(torch.abs(output_t1_prob - output_t2_prob))
-            loss_g = loss_dis + bnm_loss_c
+            loss_g = _aasm * loss_dis + _aasm * bnm_loss_c
 
             if args.log_results:
                 wandb.log({f'{seed}_C_loss': loss_g})
