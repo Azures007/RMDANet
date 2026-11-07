@@ -1726,6 +1726,29 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
                 _apply_args = argparse.Namespace(**vars(args))
                 _apply_args.tent_steps = int(args.ratc_tent_steps)
                 tent_adapt(G, F1, F2, test_loader, DEV, _apply_args)
+                _h2 = ratc_mean_entropy(G, F1, F2, test_loader, DEV,
+                                        n_batches=int(args.ratc_probe_batches))
+                print(f'[ratc] TENT check: entropy {_h0:.4f} -> {_h2:.4f}')
+                if _h2 > 1.5 * max(_h0, 1e-8):
+                    print('[ratc] TENT rejected (entropy increased), fallback to MV-LCR')
+                    ratc_restore_bn(_snap)
+                    args.mvlcr = True
+                    _tr_x = np.asarray(data['trainX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+                    _te_x = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+                    _MVLCR_STATE['spec'] = spectral_view(_tr_x, data['trainY'], _te_x, num_classes)
+                    _MVLCR_STATE['num_classes'] = int(num_classes)
+                    _perm = np.asarray(data['RandPerm'], dtype=np.int64)
+                    _MVLCR_STATE['coords'] = (
+                        np.asarray(data['Row'], dtype=np.int64)[_perm] - halfwidth,
+                        np.asarray(data['Column'], dtype=np.int64)[_perm] - halfwidth)
+                    _MVLCR_STATE['shape'] = (int(_MVLCR_STATE['coords'][0].max()) + halfwidth + 2,
+                                             int(_MVLCR_STATE['coords'][1].max()) + halfwidth + 2)
+                    _mv_y = np.asarray(data['trainY']).astype(np.int64).ravel()
+                    if _mv_y.min() == 1:
+                        _mv_y = _mv_y - 1
+                    _MVLCR_STATE['prior'] = np.bincount(_mv_y, minlength=num_classes)[:num_classes].astype(np.float64)
+                else:
+                    print('[ratc] TENT accepted')
             else:
                 print('[ratc] chose MV-LCR (BN already adapted)')
                 ratc_restore_bn(_snap)
