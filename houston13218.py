@@ -346,9 +346,9 @@ def build_parser():
     ours_group.add_argument('--ratc_thresh', default=0.35, type=float)
     ours_group.add_argument('--ratc_tent_steps', default=20, type=int)
     ours_group.add_argument('--ratc_probe_batches', default=6, type=int)
-    ours_group.add_argument('--ratc_probe_steps'
     ours_group.add_argument('--ratc_low_entropy', default=0.04, type=float,
-                            help='treat target as BN-mismatched when initial entropy is below this value'), default=2, type=int)
+                            help='treat target as BN-mismatched when initial entropy is below this value')
+    ours_group.add_argument('--ratc_probe_steps', default=2, type=int)
     ours_group.add_argument('--cns', action='store_true', default=False,
                             help='replace PATS selection with consensus-neighbourhood selection')
     ours_group.add_argument('--cns_ratio', default=0.75, type=float,
