@@ -405,6 +405,46 @@ def select_target_contrastive_samples(
 ):
     selection_mode = get_target_contrastive_selection_mode(args)
 
+    # ---- DTA: dual-temporal teacher agreement ----
+    # Positive pairs are only built from samples where a slow (high-momentum)
+    # teacher agrees with the fast EMA teacher, which suppresses pseudo-label
+    # self-confirmation drift.
+    if getattr(args, 'dta', False) and verified_mask is not None:
+        import torch as _torch
+        ratio = float(getattr(args, 'dta_ratio', 0.75))
+        _labels_t = _torch.as_tensor(pseudo_labels)
+        _agreed = _torch.as_tensor(verified_mask).bool()
+        _cand = _agreed.nonzero(as_tuple=True)[0]
+        keep = []
+        for _c in range(int(num_classes)):
+            _idx = _cand[_labels_t[_cand] == _c]
+            if _idx.numel() == 0:
+                continue
+            _k = max(1, int(round(ratio * float(_idx.numel()))))
+            _k = min(_k, int(_idx.numel()))
+            _sel = _idx[_torch.topk(pseudo_probs[_idx], _k).indices]
+            keep.append(_sel)
+        if keep:
+            selected_indices = _torch.cat(keep).long()
+        else:
+            selected_indices = _labels_t.new_empty((0,), dtype=_torch.long)
+        selected_indices = filter_target_contrastive_pairs(
+            selected_indices, pseudo_labels, num_classes)
+        selected_per_class = summarize_selected_target_classes(
+            selected_indices, pseudo_labels, num_classes)
+        metadata = {
+            'threshold': 0.0,
+            'selection_mode': 'dta',
+            'selected_per_class': selected_per_class,
+            'selected_classes': int(sum(count > 0 for count in selected_per_class)),
+            'prototype_filter': 'off',
+            'prototype_before': int(selected_indices.numel()),
+            'prototype_after': int(selected_indices.numel()),
+            'prototype_keep_rate': 1.0,
+            'prototype_valid_classes': 0,
+        }
+        return selected_indices, metadata
+
     # ---- STAB: stability-gated positive pairs ----
     # Only samples whose pseudo-label stayed unchanged for K consecutive epochs may
     # form positive pairs; prevents repeatedly reinforcing unstable pseudo-labels.

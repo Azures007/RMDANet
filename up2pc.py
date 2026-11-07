@@ -364,6 +364,11 @@ def build_parser():
     ours_group.add_argument('--stab_k', default=3, type=int)
     ours_group.add_argument('--stab_ratio', default=0.75, type=float)
     ours_group.add_argument('--stab_warmup', default=5, type=int)
+    ours_group.add_argument('--dta', action='store_true', default=False,
+                            help='dual-temporal teacher agreement for positive pairs')
+    ours_group.add_argument('--dta_momentum', default=0.999, type=float)
+    ours_group.add_argument('--dta_ratio', default=0.75, type=float)
+    ours_group.add_argument('--dta_warmup', default=5, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -954,6 +959,23 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                      for _sid in _ids_np.tolist()],
                     dtype=torch.bool, device=F1_pseudo_label_t.device)
 
+        _dta_mask = None
+        if (getattr(args, 'dta', False) and _DTA_STATE['slow'] is not None
+                and ep > int(args.dta_warmup)):
+            with torch.no_grad():
+                _slow_logits, _ = _DTA_STATE['slow'].f(teacher_feat_t)
+                if isinstance(_slow_logits, tuple):
+                    _slow_logits = _slow_logits[0]
+                _dta_mask = _slow_logits.argmax(dim=1).eq(F1_pseudo_label_t.view(-1))
+                _mom = float(args.dta_momentum)
+                for _ps, _pf in zip(_DTA_STATE['slow'].parameters(), F1_teacher.parameters()):
+                    _ps.data.mul_(_mom).add_(_pf.data, alpha=1.0 - _mom)
+                for _bs, _bf in zip(_DTA_STATE['slow'].buffers(), F1_teacher.buffers()):
+                    if _bs.shape == _bf.shape and _bs.dtype.is_floating_point:
+                        _bs.data.mul_(_mom).add_(_bf.data, alpha=1.0 - _mom)
+                    else:
+                        _bs.data.copy_(_bf.data)
+
         contrastive_loss_t, target_contrastive_stats = compute_target_contrastive_loss(
             teacher_proj_t,
             student_proj_t,
@@ -967,7 +989,8 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             prototype_filter_projections=teacher_proj_t,
             source_prototype_state=source_prototype_state,
             return_indices=True,
-            verified_mask=(_pcv_mask if getattr(args, 'pcv', False) else _stab_mask),
+            verified_mask=(_pcv_mask if getattr(args, 'pcv', False)
+                           else (_stab_mask if getattr(args, 'stab', False) else _dta_mask)),
         )
         target_contrastive_stats.update(quota_stats)
         contrastive_loss = contrastive_loss_s + contrastive_loss_t
@@ -1492,6 +1515,8 @@ from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
 _FDA_STATS = {'mu_s': None, 'sd_s': None, 'mu_t': None, 'sd_t': None}
 _MVLCR_STATE = {'spec': None}
+_DTA_STATE = {'slow': None}
+
 _STAB_STATE = {'last': {}, 'streak': {}}
 
 
@@ -1814,6 +1839,11 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
     F1 = models['F1']
     F2 = models['F2']
     F1_teacher = models['F1_teacher']
+    if getattr(args, 'dta', False):
+        import copy as _copy
+        _DTA_STATE['slow'] = _copy.deepcopy(F1_teacher)
+        for _p in _DTA_STATE['slow'].parameters():
+            _p.requires_grad_(False)
     contrastive_loss_func = models['contrastive_loss_func']
     optimizer_g = models['optimizer_g']
     optimizer_f = models['optimizer_f']
