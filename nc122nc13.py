@@ -314,7 +314,9 @@ def build_parser():
     ours_group.add_argument('--ratc_thresh', default=0.35, type=float)
     ours_group.add_argument('--ratc_tent_steps', default=20, type=int)
     ours_group.add_argument('--ratc_probe_batches', default=6, type=int)
-    ours_group.add_argument('--ratc_probe_steps', default=2, type=int)
+    ours_group.add_argument('--ratc_probe_steps'
+    ours_group.add_argument('--ratc_low_entropy', default=0.04, type=float,
+                            help='treat target as BN-mismatched when initial entropy is below this value'), default=2, type=int)
     ours_group.add_argument('--cns', action='store_true', default=False,
                             help='replace PATS selection with consensus-neighbourhood selection')
     ours_group.add_argument('--cns_ratio', default=0.75, type=float,
@@ -1717,8 +1719,10 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             _ratio = (_h0 - _h1) / max(1e-8, _h0)
             print(f'[ratc] entropy {_h0:.4f} -> {_h1:.4f}, reduction ratio {_ratio:.3f} '
                   f'(threshold {args.ratc_thresh})')
-            if _ratio > float(args.ratc_thresh):
-                print('[ratc] chose TENT (strongly compressible BN statistics)')
+            _low_ent = float(getattr(args, 'ratc_low_entropy', 0.04))
+            if (_ratio > float(args.ratc_thresh)) or (_h0 < _low_ent):
+                print(f'[ratc] chose TENT (ratio={_ratio:.3f}, H0={_h0:.4f}, '
+                      f'low_entropy_threshold={_low_ent})')
                 _apply_args = argparse.Namespace(**vars(args))
                 _apply_args.tent_steps = int(args.ratc_tent_steps)
                 tent_adapt(G, F1, F2, test_loader, DEV, _apply_args)
