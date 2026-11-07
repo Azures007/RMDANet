@@ -1678,6 +1678,18 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             print(f'[mvlcr] change ratio vs F1 predictions: {_mv_change*100:.2f}%')
             predict_ensemble = _mv_post
             acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
+            if (ssti_context is not None
+                    and (getattr(args, 'ssti', False) or getattr(args, 'sepg', False))):
+                import torch as _t
+                _lg = _t.log(_t.tensor(_post, dtype=_t.float32).clamp_min(1e-8))
+                _ref = refine_labels(
+                    _lg, ssti_context, labels,
+                    alpha=args.ssti_alpha, beta=args.ssti_beta,
+                    iterations=args.ssti_iters, temperature=args.ssti_temperature,
+                    confidence_threshold=args.ssti_conf_threshold,
+                )
+                predict_ensemble = _ref
+                acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
 
         if args.eval_mode == 'f1':
             predict_eval = predict_f1
