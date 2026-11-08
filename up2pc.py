@@ -368,6 +368,9 @@ def build_parser():
     ours_group.add_argument('--vplha_batch', default=4096, type=int)
     ours_group.add_argument('--vplha_smooth', default=0.1, type=float)
     ours_group.add_argument('--vplha_wd', default=0.0001, type=float)
+    ours_group.add_argument('--svtta', action='store_true', default=False,
+                            help='self-verifying TTA: reject corrections that break spatial consistency')
+    ours_group.add_argument('--svtta_margin', default=0.005, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1455,6 +1458,7 @@ from modules.ratc import (diagnose as ratc_diagnose,
                           snapshot_bn as ratc_snapshot_bn,
                           restore_bn as ratc_restore_bn)
 from modules.vplha import vplha_adapt
+from modules.svtta import predict_labels, spatial_consistency
 from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
@@ -1686,6 +1690,16 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                 print(f'[mvlcr] conf gate {_cg:.2f}: kept {float(_keep.mean())*100:.1f}% confident pixels')
             _mv_change = float((_mv_post != _p1.argmax(axis=1)).mean())
             print(f'[mvlcr] change ratio vs F1 predictions: {_mv_change*100:.2f}%')
+            if getattr(args, 'svtta', False) and ssti_context is not None:
+                _sv_base = _p1.argmax(axis=1)
+                _sv_cb = spatial_consistency(_sv_base, ssti_context['coords'],
+                                             ssti_context['shape'])
+                _sv_cp = spatial_consistency(_mv_post, ssti_context['coords'],
+                                             ssti_context['shape'])
+                print(f'[svtta] MV-LCR consistency {_sv_cb:.4f} -> {_sv_cp:.4f}')
+                if _sv_cp < _sv_cb - float(args.svtta_margin):
+                    print('[svtta] MV-LCR rejected (consistency dropped), revert to base')
+                    _mv_post = _sv_base
             predict_ensemble = _mv_post
             acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
             if (ssti_context is not None
@@ -1935,6 +1949,9 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             _h0 = ratc_mean_entropy(G, F1, F2, test_loader, DEV,
                                     n_batches=int(args.ratc_probe_batches))
             _snap = ratc_snapshot_bn((G, F1, F2))
+            _sv_lab0 = None
+            if getattr(args, 'svtta', False) and ssti_context is not None:
+                _sv_lab0 = predict_labels(G, F1, F2, test_loader, DEV)
             _probe_args = argparse.Namespace(**vars(args))
             _probe_args.tent_steps = int(args.ratc_probe_steps)
             tent_adapt(G, F1, F2, test_loader, DEV, _probe_args)
@@ -1953,8 +1970,17 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
                 _h2 = ratc_mean_entropy(G, F1, F2, test_loader, DEV,
                                         n_batches=int(args.ratc_probe_batches))
                 print(f'[ratc] TENT check: entropy {_h0:.4f} -> {_h2:.4f}')
-                if _h2 > 1.5 * max(_h0, 1e-8):
-                    print('[ratc] TENT rejected (entropy increased), fallback to MV-LCR')
+                _sv_ok = True
+                if _sv_lab0 is not None:
+                    _sv_lab1 = predict_labels(G, F1, F2, test_loader, DEV)
+                    _sv_c0 = spatial_consistency(_sv_lab0, ssti_context['coords'],
+                                                 ssti_context['shape'])
+                    _sv_c1 = spatial_consistency(_sv_lab1, ssti_context['coords'],
+                                                 ssti_context['shape'])
+                    print(f'[svtta] TENT consistency {_sv_c0:.4f} -> {_sv_c1:.4f}')
+                    _sv_ok = _sv_c1 >= _sv_c0 - float(args.svtta_margin)
+                if (_h2 > 1.5 * max(_h0, 1e-8)) or (not _sv_ok):
+                    print('[svtta] TENT rejected (entropy/consistency), fallback to MV-LCR')
                     ratc_restore_bn(_snap)
                     args.mvlcr = True
                     _tr_x = np.asarray(data['trainX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
