@@ -65,7 +65,8 @@ HOUSTON_DATA_PATHS = {
     'target_data': "datasets/Houston/Houston18.mat",
     'target_label': "datasets/Houston/Houston18_7gt.mat",
 }
-SEEDS = [1599, 1364, 1379, 1672, 1304, 1461, 1718, 1603, 1779, 1358]
+SEEDS = [1599, 1364, 1379, 1672, 1304, 1461, 1718, 1603, 1779, 1358,
+         2011, 2012, 2013, 2014, 2015]
 
 
 _INSTABILITY_EMA = {'value': None}

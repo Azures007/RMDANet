@@ -52,7 +52,8 @@ YRD_DATA_PATHS = {
     'target_data': "datasets/YRD/yrd_nc13.mat",
     'target_label': "datasets/YRD/yrd_nc13_7gt.mat",
 }
-SEEDS = [1838, 1785, 1433, 1621, 1353, 1896, 1598, 1869, 1700, 1814]
+SEEDS = [1838, 1785, 1433, 1621, 1353, 1896, 1598, 1869, 1700, 1814,
+         2031, 2032, 2033, 2034, 2035]
 
 
 _INSTABILITY_EMA = {'value': None}

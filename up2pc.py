@@ -65,7 +65,8 @@ PAVIA_DATA_PATHS = {
     'target_data': "datasets/Pavia/pavia.mat",
     'target_label': "datasets/Pavia/pavia_gt_7.mat",
 }
-SEEDS = [1726, 1040, 1885, 1083, 1937, 1921, 1270, 1343, 1914, 1077]
+SEEDS = [1726, 1040, 1885, 1083, 1937, 1921, 1270, 1343, 1914, 1077,
+         2021, 2022, 2023, 2024, 2025]
 
 
 _INSTABILITY_EMA = {'value': None}
