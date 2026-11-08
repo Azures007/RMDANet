@@ -355,6 +355,14 @@ def build_parser():
                             help='reliability-weighted discrepancy loss')
     ours_group.add_argument('--tar', action='store_true', default=False,
                             help='tail-aware entropy regulariser replacing BNM')
+    ours_group.add_argument('--rgs_selector', default='legacy',
+                            choices=['legacy', 'independent_conf', 'independent_agree',
+                                     'independent_proto', 'independent_joint'],
+                            help='independent target-domain CE selection for RGS')
+    ours_group.add_argument('--rgs_conf_threshold', default=0.95, type=float)
+    ours_group.add_argument('--rgs_weight_mode', default='teacher_conf',
+                            choices=['uniform', 'teacher_conf'])
+    ours_group.add_argument('--rgs_class_cap', default=0, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -606,6 +614,16 @@ def prat_augment(source_images, target_images, strength=0.5, probability=0.5):
 def parse_runtime_args():
     parsed_args = build_parser().parse_args()
     parsed_args.cuda = not parsed_args.no_cuda and torch.cuda.is_available()
+    if str(getattr(parsed_args, 'rgs_selector', 'legacy')) != 'legacy':
+        _conf = []
+        if (getattr(parsed_args, 'cns', False) or getattr(parsed_args, 'lscs', False)
+                or getattr(parsed_args, 'rcs', False)):
+            _conf.append('--cns/--lscs/--rcs')
+        if str(getattr(parsed_args, 'm1_select', 'pats')) != 'pats':
+            _conf.append('--m1_select')
+        if _conf:
+            raise SystemExit('[rgs_selector] conflicts with ' + ', '.join(_conf)
+                             + '; use --m1_select pats and disable cns/lscs/rcs')
     device = torch.device('cuda:' + str(parsed_args.gpu) if torch.cuda.is_available() else 'cpu')
     return parsed_args, device
 
@@ -1103,7 +1121,9 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
             if pats_indices is not None and pats_indices.numel() > 0:
                 _pats_mask[pats_indices] = True
 
-        if ((reliab_ce_weight > 0 or proto_anchor_weight > 0)
+        _rgs_mode = str(getattr(args, 'rgs_selector', 'legacy'))
+        _rgs_indep = _rgs_mode != 'legacy'
+        if (not _rgs_indep) and ((reliab_ce_weight > 0 or proto_anchor_weight > 0)
                 and pats_indices is not None and pats_indices.numel() > 0):
             with torch.no_grad():
                 if args.m1_teacher_temperature > 0:
@@ -1278,6 +1298,36 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                             )
                             all_loss = all_loss + proto_anchor_weight * anchor.mean()
 
+        if _rgs_indep and reliab_ce_weight > 0:
+            with torch.no_grad():
+                _rgs_logits, _ = F1_teacher.f(teacher_feat_t)
+                _rgs_prob = torch.softmax(_rgs_logits.detach().float(), dim=1)
+                _rgs_pred = _rgs_prob.argmax(dim=1)
+                _rgs_conf = _rgs_prob.max(dim=1).values
+            _rgs_idx, _rgs_labels, _rgs_w, _rgs_stats = select_rgs_samples(
+                teacher_pred=_rgs_pred,
+                teacher_conf=_rgs_conf,
+                f1_logits=output_t1.detach(),
+                f2_logits=output_t2.detach(),
+                student_proj=student_proj_t,
+                source_prototype_state=source_prototype_state,
+                num_classes=num_classes,
+                ep=ep,
+                args=args,
+            )
+            if _rgs_idx is not None and _rgs_idx.numel() > 0:
+                _rgs_ce = F.cross_entropy(output_t1[_rgs_idx], _rgs_labels, reduction='none')
+                _rgs_loss = (_rgs_ce * _rgs_w).sum() / _rgs_w.sum().clamp_min(1e-6)
+                all_loss = all_loss + reliab_ce_weight * _rgs_loss
+                if ep % 10 == 0:
+                    print(f"[rgs_{_rgs_stats['mode']}] ep={ep} total={_rgs_stats['total']} "
+                          f"selected={_rgs_stats['selected']} conf={_rgs_stats['conf_mean']:.3f} "
+                          f"agree={_rgs_stats['agree_rate']:.3f} proto={_rgs_stats['proto_rate']:.3f} "
+                          f"ce={float(_rgs_loss):.4f} w={reliab_ce_weight:.4f} "
+                          f"per_class={_rgs_stats['per_class']}")
+            elif ep % 10 == 0:
+                print(f"[rgs_{_rgs_stats['mode']}] ep={ep} empty selection, RGS skipped")
+
         coral_weight = get_rampup_weight(
             ep, args.coral_start_epoch, args.coral_ramp_epochs, args.coral_weight
         )
@@ -1444,6 +1494,7 @@ from modules.ratc import (diagnose as ratc_diagnose,
 from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
+from modules.rgs_selector import select_rgs_samples
 from modules.capp import build_stats as capp_build_stats, capp_log_probs
 from modules.ttdc import collect_predictions, build_bias
 from modules.cfm import build_mixed_features
