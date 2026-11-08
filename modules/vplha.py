@@ -47,14 +47,16 @@ def train_verified_head(feats, pseudo_labels, num_classes, conf, f1_pred, f2_pre
     epochs = int(getattr(args, 'vplha_epochs', 200))
     bs = int(getattr(args, 'vplha_batch', 4096))
     n = X.shape[0]
-    for _ in range(epochs):
-        perm = torch.randperm(n)
-        for i in range(0, n, bs):
-            idx = perm[i:i + bs]
-            loss = lossf(head(X[idx]), y[idx])
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
+    # test_model 外层是 torch.no_grad()，这里必须显式打开梯度
+    with torch.enable_grad():
+        for _ in range(epochs):
+            perm = torch.randperm(n)
+            for i in range(0, n, bs):
+                idx = perm[i:i + bs]
+                loss = lossf(head(X[idx]), y[idx])
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
     head.eval()
     return head, frac
 
