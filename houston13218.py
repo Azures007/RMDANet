@@ -1757,7 +1757,9 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             _probs = torch.softmax(_lg_all, dim=1)
             _base_lab = _probs.argmax(dim=1).cpu().numpy()
             _cands = [('base', _base_lab)]
-            for _it in (1, 2, 4):
+            for _it in (1, 2, 4, int(args.ssti_iters)):
+                if any(_nm == f'ssti{_it}' for _nm, _ in _cands):
+                    continue
                 _ref = refine_labels(
                     torch.log(_probs.clamp_min(1e-8)), ssti_context, labels,
                     alpha=args.ssti_alpha, beta=args.ssti_beta,
@@ -1770,6 +1772,9 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             _prior = _prior / max(1.0, _prior.sum())
             _coords = ssti_context['coords']
             _shape = ssti_context['shape']
+            _cons_base = float(spatial_consistency(_base_lab, _coords, _shape))
+            _svtta_cons_base = _cons_base
+            _lam = float(getattr(args, 'svtta_change_penalty', 2.0))
             _best_name, _best_lab, _best_sc = None, None, -1e9
             for _nm, _lab in _cands:
                 _cons = float(spatial_consistency(_lab, _coords, _shape))
@@ -1777,8 +1782,9 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
                 _hist = _hist / max(1.0, _hist.sum())
                 _den = _np.maximum(_hist + _prior, 1e-8)
                 _pdist = float(((_hist - _prior) ** 2 / _den).sum())
-                _sc = _cons - 0.5 * _pdist
-                print(f'[svtta] candidate {_nm}: consistency={_cons:.4f} prior_dist={_pdist:.4f} score={_sc:.4f}')
+                _chg = float((_np.asarray(_lab) != _base_lab).mean())
+                _sc = (_cons - _cons_base) - _lam * _chg - 0.5 * _pdist
+                print(f'[svtta] candidate {_nm}: consistency={_cons:.4f} prior_dist={_pdist:.4f} change={_chg*100:.2f}% score={_sc:.4f}')
                 if _sc > _best_sc:
                     _best_sc, _best_lab, _best_name = _sc, _lab, _nm
             predict_ensemble = _best_lab
