@@ -344,6 +344,8 @@ def build_parser():
     ours_group.add_argument('--svtta', action='store_true', default=False,
                             help='self-verifying TTA: reject corrections that break spatial consistency')
     ours_group.add_argument('--svtta_margin', default=0.005, type=float)
+    ours_group.add_argument('--svtta_multi', action='store_true', default=False,
+                            help='select among SSTI iteration candidates by label-free verification')
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1584,6 +1586,40 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             predict_ensemble = _pl_final
             acc_ensemble = 100. * float((_pl_final == labels).sum()) / float(len_tar_dataset)
             print(f'[vplha] final OA={acc_ensemble:.2f}% verified={_vplha_info.get("verified_frac", 0)*100:.1f}%')
+
+        if getattr(args, 'svtta_multi', False) and ssti_context is not None:
+            import numpy as _np
+            _lg_all = torch.cat(eval_logits_batches, 0).float()
+            _probs = torch.softmax(_lg_all, dim=1)
+            _base_lab = _probs.argmax(dim=1).cpu().numpy()
+            _cands = [('base', _base_lab)]
+            for _it in (1, 2, 4):
+                _ref = refine_labels(
+                    torch.log(_probs.clamp_min(1e-8)), ssti_context, labels,
+                    alpha=args.ssti_alpha, beta=args.ssti_beta,
+                    iterations=_it, temperature=args.ssti_temperature,
+                    confidence_threshold=args.ssti_conf_threshold,
+                )
+                _cands.append((f'ssti{_it}', _ref))
+            _nc = int(_probs.shape[1])
+            _prior = _np.bincount(_base_lab, minlength=_nc).astype(_np.float64)
+            _prior = _prior / max(1.0, _prior.sum())
+            _coords = ssti_context['coords']
+            _shape = ssti_context['shape']
+            _best_name, _best_lab, _best_sc = None, None, -1e9
+            for _nm, _lab in _cands:
+                _cons = float(spatial_consistency(_lab, _coords, _shape))
+                _hist = _np.bincount(_np.asarray(_lab), minlength=_nc).astype(_np.float64)
+                _hist = _hist / max(1.0, _hist.sum())
+                _den = _np.maximum(_hist + _prior, 1e-8)
+                _pdist = float(((_hist - _prior) ** 2 / _den).sum())
+                _sc = _cons - 0.5 * _pdist
+                print(f'[svtta] candidate {_nm}: consistency={_cons:.4f} prior_dist={_pdist:.4f} score={_sc:.4f}')
+                if _sc > _best_sc:
+                    _best_sc, _best_lab, _best_name = _sc, _lab, _nm
+            predict_ensemble = _best_lab
+            acc_ensemble = 100. * float((_best_lab == labels).sum()) / float(len_tar_dataset)
+            print(f'[svtta] selected {_best_name}: OA={acc_ensemble:.2f}%')
 
         if args.eval_mode == 'f1':
             predict_eval = predict_f1
