@@ -346,6 +346,9 @@ def build_parser():
     ours_group.add_argument('--svtta_margin', default=0.005, type=float)
     ours_group.add_argument('--svtta_multi', action='store_true', default=False,
                             help='select among SSTI iteration candidates by label-free verification')
+    ours_group.add_argument('--clgate', action='store_true', default=False,
+                            help='per-pixel consensus gate for RATC/SSTI corrections')
+    ours_group.add_argument('--clgate_min', default=2, type=int)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1302,6 +1305,7 @@ from modules.ratc import (diagnose as ratc_diagnose,
                           snapshot_bn as ratc_snapshot_bn,
                           restore_bn as ratc_restore_bn)
 from modules.vplha import vplha_adapt
+from modules.clgate import consensus_gate
 from modules.svtta import predict_labels, spatial_consistency
 from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
@@ -1626,6 +1630,21 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             predict_ensemble = _best_lab
             acc_ensemble = 100. * float((_best_lab == labels).sum()) / float(len_tar_dataset)
             print(f'[svtta] selected {_best_name}: OA={acc_ensemble:.2f}%')
+
+        if getattr(args, 'clgate', False) and ssti_context is not None:
+            import numpy as _np
+            _lg_all = torch.cat(eval_logits_batches, 0).float()
+            _base_lab = _lg_all.argmax(dim=1).cpu().numpy()
+            _views = [predict_f2]
+            if _MVLCR_STATE.get('spec', None) is not None:
+                _views.append(_MVLCR_STATE['spec'].argmax(axis=1))
+            _gated, _chg = consensus_gate(
+                _base_lab, predict_ensemble, _views,
+                ssti_context['coords'], ssti_context['shape'],
+                min_votes=int(args.clgate_min))
+            predict_ensemble = _gated
+            acc_ensemble = 100. * float((_gated == labels).sum()) / float(len_tar_dataset)
+            print(f'[clgate] reverted {_chg*100:.2f}% pixels to base, OA={acc_ensemble:.2f}%')
 
         if args.eval_mode == 'f1':
             predict_eval = predict_f1
