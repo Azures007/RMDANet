@@ -1659,16 +1659,20 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
                               prior=_mvlcr_prior_hat,
                               fix_prior=bool(getattr(args, 'mvlcr_fix_prior', 1)))
             _mv_post = _post.argmax(axis=1)
+            _p_ssti = _post
             if str(getattr(args, 'mvlcr_gate', 'none')) == 'disagree':
                 _orig = _p1.argmax(axis=1)
                 _agree = ((_p1.argmax(axis=1) == _p2.argmax(axis=1))
                           & (_p1.argmax(axis=1) == _MVLCR_STATE['spec'].argmax(axis=1)))
                 _mv_post = _np.where(_agree, _orig, _mv_post)
+                _p_ssti = _np.where(_agree[:, None], _p1, _post)
                 print(f'[mvlcr] gate=disagree: kept {float(_agree.mean())*100:.1f}% pixels unchanged')
+            _p_ssti = _post
             _blend = float(getattr(args, 'mvlcr_blend', 1.0))
             if _blend < 1.0:
                 _p_blend = (1.0 - _blend) * _p1 + _blend * _post
                 _mv_post = _p_blend.argmax(axis=1)
+                _p_ssti = _p_blend
                 print(f'[mvlcr] soft blend alpha={_blend:.2f}')
             _cg = float(getattr(args, 'mvlcr_conf_gate', 0.0))
             if _cg > 0.0:
@@ -1683,7 +1687,7 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
             if (ssti_context is not None
                     and (getattr(args, 'ssti', False) or getattr(args, 'sepg', False))):
                 import torch as _t
-                _lg = _t.log(_t.tensor(_post, dtype=_t.float32).clamp_min(1e-8))
+                _lg = _t.log(_t.tensor(_p_ssti, dtype=_t.float32).clamp_min(1e-8))
                 _ref = refine_labels(
                     _lg, ssti_context, labels,
                     alpha=args.ssti_alpha, beta=args.ssti_beta,
