@@ -21,11 +21,13 @@ def _verified_mask(pseudo_labels, conf, f1_pred, f2_pred, args):
             & (conf >= tau))
 
 
-def train_verified_head(feats, pseudo_labels, num_classes, conf, f1_pred, f2_pred, args):
+def train_verified_head(feats, pseudo_labels, num_classes, conf, f1_pred, f2_pred, args,
+                        mask=None):
     torch = _torch()
     import torch.nn as nn
 
-    mask = _verified_mask(pseudo_labels, conf, f1_pred, f2_pred, args)
+    if mask is None:
+        mask = _verified_mask(pseudo_labels, conf, f1_pred, f2_pred, args)
     n_ok = int(mask.sum())
     frac = n_ok / max(1, mask.shape[0])
     min_n = int(getattr(args, 'vplha_min_samples', 100))
@@ -84,14 +86,26 @@ def vplha_adapt(feats, base_p, f1_pred, f2_pred, labels_gt, num_classes,
     conf = base_p.max(axis=1)
 
     rounds = max(1, int(getattr(args, 'vplha_rounds', 2)))
-    alpha = float(getattr(args, 'vplha_alpha', 0.5))
+    alpha = float(getattr(args, 'vplha_alpha', 0.3))
     pl_final = pl
     last_acc = float((pl_final == labels_gt).mean() * 100.0)
     info = {}
 
+    # 验证掩码只计算一次（基于原始 base 预测），后续轮复用，
+    # 否则 SSTI 改写伪标签后掩码会塌缩到接近 0。
+    base_lab = base_p.argmax(axis=1)
+    static_mask = _verified_mask(base_lab, base_p.max(axis=1), f1_pred, f2_pred, args)
+    min_frac = float(getattr(args, 'vplha_min_frac', 0.05))
+    if float(static_mask.mean()) < min_frac:
+        print(f'[vplha] verified fraction {float(static_mask.mean())*100:.1f}% '
+              f'< {min_frac*100:.0f}%, skip adaptation')
+        info['verified_frac'] = float(static_mask.mean())
+        info['final_acc'] = last_acc
+        return pl_final, last_acc, info
+
     for r in range(rounds):
         head, frac = train_verified_head(feats, pl, num_classes, conf,
-                                         f1_pred, f2_pred, args)
+                                         f1_pred, f2_pred, args, mask=static_mask)
         info['verified_frac'] = frac
         if head is None:
             print(f'[vplha] round {r}: verified samples too few '
