@@ -15,6 +15,42 @@ def _torch():
     return torch
 
 
+
+def _neighbour_features(feats, context, passes=1):
+    """Average feature of the 8 spatial neighbours (uses SSTI coords/shape)."""
+    if context is None:
+        return None
+    coords = context.get("coords")
+    shape = context.get("shape")
+    if coords is None or shape is None:
+        return None
+    rows, cols = np.asarray(coords[0]), np.asarray(coords[1])
+    height, width = int(shape[0]), int(shape[1])
+    n = feats.shape[0]
+    if len(rows) != n:
+        return None
+    grid = np.full((height, width), -1, dtype=np.int64)
+    grid[rows, cols] = np.arange(n)
+    offsets = [(-1, -1), (-1, 0), (-1, 1), (0, -1),
+               (0, 1), (1, -1), (1, 0), (1, 1)]
+    acc = np.zeros_like(feats, dtype=np.float32)
+    cnt = np.zeros(n, dtype=np.float32)
+    for dr, dc in offsets:
+        nr, nc = rows + dr, cols + dc
+        inside = (nr >= 0) & (nr < height) & (nc >= 0) & (nc < width)
+        vi = np.nonzero(inside)[0]
+        if len(vi) == 0:
+            continue
+        ni = grid[nr[vi], nc[vi]]
+        keep = ni >= 0
+        vi, ni = vi[keep], ni[keep]
+        if len(vi) == 0:
+            continue
+        acc[vi] += feats[ni]
+        cnt[vi] += 1.0
+    cnt = np.maximum(cnt, 1.0)
+    return (acc / cnt[:, None]).astype(np.float32)
+
 def _verified_mask(pseudo_labels, conf, f1_pred, f2_pred, args):
     tau = float(getattr(args, 'vplha_conf', 0.9))
     return ((f1_pred == pseudo_labels) & (f2_pred == pseudo_labels)
@@ -74,10 +110,19 @@ def predict_head(head, feats, num_classes, batch=4096):
 
 
 def vplha_adapt(feats, base_p, f1_pred, f2_pred, labels_gt, num_classes,
-                ssti_call, args):
+                ssti_call, args, context=None):
     """Returns (final_labels, last_round_acc, info_dict)."""
     base_p = np.clip(np.asarray(base_p, dtype=np.float64), 1e-8, None)
     base_p = base_p / base_p.sum(axis=1, keepdims=True)
+
+    feat_in = feats
+    if context is not None:
+        neigh = _neighbour_features(feats, context)
+        if neigh is not None:
+            feat_in = np.concatenate([feats, neigh], axis=1)
+            print(f'[vplha] spatial context features: {feats.shape[1]} -> {feat_in.shape[1]}')
+    base_conf_all = base_p.max(axis=1)
+    apply_thr = float(getattr(args, 'vplha_apply_conf', 0.95))
 
     if ssti_call is not None:
         pl = ssti_call(np.log(base_p))
@@ -104,15 +149,18 @@ def vplha_adapt(feats, base_p, f1_pred, f2_pred, labels_gt, num_classes,
         return pl_final, last_acc, info
 
     for r in range(rounds):
-        head, frac = train_verified_head(feats, pl, num_classes, conf,
+        head, frac = train_verified_head(feat_in, pl, num_classes, conf,
                                          f1_pred, f2_pred, args, mask=static_mask)
         info['verified_frac'] = frac
         if head is None:
             print(f'[vplha] round {r}: verified samples too few '
                   f'({frac * 100:.1f}%), stop')
             break
-        hp = predict_head(head, feats, num_classes)
+        hp = predict_head(head, feat_in, num_classes)
         ens = (1.0 - alpha) * base_p + alpha * hp
+        if apply_thr < 1.0:
+            keep = base_conf_all >= apply_thr
+            ens[keep] = base_p[keep]
         ens = np.clip(ens, 1e-8, None)
         ens = ens / ens.sum(axis=1, keepdims=True)
         if ssti_call is not None:

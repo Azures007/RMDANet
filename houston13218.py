@@ -366,7 +366,8 @@ def build_parser():
     ours_group.add_argument('--vplha_rounds', default=2, type=int)
     ours_group.add_argument('--vplha_epochs', default=200, type=int)
     ours_group.add_argument('--vplha_lr', default=0.01, type=float)
-    ours_group.add_argument('--vplha_alpha', default=0.5, type=float)
+    ours_group.add_argument('--vplha_alpha', default=0.3, type=float)
+    ours_group.add_argument('--vplha_apply_conf', default=0.95, type=float)
     ours_group.add_argument('--vplha_conf', default=0.9, type=float)
     ours_group.add_argument('--vplha_min_samples', default=100, type=int)
     ours_group.add_argument('--vplha_batch', default=4096, type=int)
@@ -1729,7 +1730,7 @@ def test_model(test_loader, G, F1, F2, DEV, len_tar_dataset, args, seed, ssti_co
                 _ssti_call = None
             _pl_final, _vplha_acc, _vplha_info = vplha_adapt(
                 _feats, _base_p, predict_f1, predict_f2, labels, _vnc,
-                _ssti_call, args)
+                _ssti_call, args, context=ssti_context)
             predict_ensemble = _pl_final
             acc_ensemble = 100. * float((_pl_final == labels).sum()) / float(len_tar_dataset)
             print(f'[vplha] final OA={acc_ensemble:.2f}% verified={_vplha_info.get("verified_frac", 0)*100:.1f}%')
