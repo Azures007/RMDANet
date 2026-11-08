@@ -356,6 +356,17 @@ def build_parser():
                             help='reliability-weighted discrepancy loss')
     ours_group.add_argument('--tar', action='store_true', default=False,
                             help='tail-aware entropy regulariser replacing BNM')
+    ours_group.add_argument('--vplha', action='store_true', default=False,
+                            help='verified pseudo-label head adaptation (closed loop with RATC/SSTI)')
+    ours_group.add_argument('--vplha_rounds', default=2, type=int)
+    ours_group.add_argument('--vplha_epochs', default=200, type=int)
+    ours_group.add_argument('--vplha_lr', default=0.01, type=float)
+    ours_group.add_argument('--vplha_alpha', default=0.5, type=float)
+    ours_group.add_argument('--vplha_conf', default=0.9, type=float)
+    ours_group.add_argument('--vplha_min_samples', default=100, type=int)
+    ours_group.add_argument('--vplha_batch', default=4096, type=int)
+    ours_group.add_argument('--vplha_smooth', default=0.1, type=float)
+    ours_group.add_argument('--vplha_wd', default=0.0001, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1442,6 +1453,7 @@ from modules.ratc import (diagnose as ratc_diagnose,
                           mean_entropy as ratc_mean_entropy,
                           snapshot_bn as ratc_snapshot_bn,
                           restore_bn as ratc_restore_bn)
+from modules.vplha import vplha_adapt
 from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
@@ -1687,6 +1699,30 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
                 )
                 predict_ensemble = _ref
                 acc_ensemble = 100. * float((predict_ensemble == labels).sum()) / float(len_tar_dataset)
+
+        if getattr(args, 'vplha', False) and len(outputdata) > 0:
+            import numpy as _np
+            _feats = _np.concatenate(outputdata, 0).astype(_np.float32)
+            _lg_all = torch.cat(eval_logits_batches, 0).float()
+            _base_p = torch.softmax(_lg_all, dim=1).cpu().numpy()
+            _vnc = int(_base_p.shape[1])
+            if ssti_context is not None and (getattr(args, 'ssti', False) or getattr(args, 'sepg', False)):
+                def _ssti_call(_lg, _ctx=ssti_context):
+                    return refine_labels(
+                        _lg, _ctx, labels,
+                        alpha=args.ssti_alpha, beta=args.ssti_beta,
+                        iterations=args.ssti_iters,
+                        temperature=args.ssti_temperature,
+                        confidence_threshold=args.ssti_conf_threshold,
+                    )
+            else:
+                _ssti_call = None
+            _pl_final, _vplha_acc, _vplha_info = vplha_adapt(
+                _feats, _base_p, predict_f1, predict_f2, labels, _vnc,
+                _ssti_call, args)
+            predict_ensemble = _pl_final
+            acc_ensemble = 100. * float((_pl_final == labels).sum()) / float(len_tar_dataset)
+            print(f'[vplha] final OA={acc_ensemble:.2f}% verified={_vplha_info.get("verified_frac", 0)*100:.1f}%')
 
         if args.eval_mode == 'f1':
             predict_eval = predict_f1
