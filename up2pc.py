@@ -363,6 +363,9 @@ def build_parser():
     ours_group.add_argument('--rgs_weight_mode', default='teacher_conf',
                             choices=['uniform', 'teacher_conf'])
     ours_group.add_argument('--rgs_class_cap', default=0, type=int)
+    ours_group.add_argument('--svtta', action='store_true', default=False,
+                            help='self-verifying TTA: reject corrections that break spatial consistency')
+    ours_group.add_argument('--svtta_margin', default=0.005, type=float)
     ours_group.add_argument('--m1_select', default='pats',
                             choices=['pats', 'all', 'random', 'excluded', 'rcs'],
                             help='RGS sample set for diagnosis/intervention: '
@@ -1491,6 +1494,7 @@ from modules.ratc import (diagnose as ratc_diagnose,
                           mean_entropy as ratc_mean_entropy,
                           snapshot_bn as ratc_snapshot_bn,
                           restore_bn as ratc_restore_bn)
+from modules.svtta import predict_labels, spatial_consistency
 from modules.tent import tent_adapt
 from modules.tmsa import adapt as tmsa_adapt
 from modules.mvlcr import fit_mvlcr, spectral_view, spatial_view, dcm_views
@@ -1944,6 +1948,9 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
             _h0 = ratc_mean_entropy(G, F1, F2, test_loader, DEV,
                                     n_batches=int(args.ratc_probe_batches))
             _snap = ratc_snapshot_bn((G, F1, F2))
+            _sv_lab0 = None
+            if getattr(args, 'svtta', False) and ssti_context is not None:
+                _sv_lab0 = predict_labels(G, F1, F2, test_loader, DEV)
             _probe_args = argparse.Namespace(**vars(args))
             _probe_args.tent_steps = int(args.ratc_probe_steps)
             tent_adapt(G, F1, F2, test_loader, DEV, _probe_args)
@@ -1959,6 +1966,17 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
                 _apply_args = argparse.Namespace(**vars(args))
                 _apply_args.tent_steps = int(args.ratc_tent_steps)
                 tent_adapt(G, F1, F2, test_loader, DEV, _apply_args)
+                if _sv_lab0 is not None:
+                    _sv_lab1 = predict_labels(G, F1, F2, test_loader, DEV)
+                    _sv_c0 = spatial_consistency(_sv_lab0, ssti_context['coords'],
+                                                 ssti_context['shape'])
+                    _sv_c1 = spatial_consistency(_sv_lab1, ssti_context['coords'],
+                                                 ssti_context['shape'])
+                    print(f'[svtta] TENT consistency {_sv_c0:.4f} -> {_sv_c1:.4f}')
+                    if _sv_c1 < _sv_c0 - float(args.svtta_margin):
+                        print('[svtta] TENT rejected (consistency dropped), fallback to MV-LCR')
+                        ratc_restore_bn(_snap)
+                        args.mvlcr = True
             else:
                 print('[ratc] chose MV-LCR (BN already adapted)')
                 ratc_restore_bn(_snap)
@@ -1977,6 +1995,22 @@ def run_one_dataset(dataset_index, seed, experiment_config, metrics_state, best_
                 if _mv_y.min() == 1:
                     _mv_y = _mv_y - 1
                 _MVLCR_STATE['prior'] = np.bincount(_mv_y, minlength=num_classes)[:num_classes].astype(np.float64)
+            if args.mvlcr and _MVLCR_STATE.get('spec') is None:
+                _tr_x = np.asarray(data['trainX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+                _te_x = np.asarray(data['testX'], dtype=np.float32)[:, :, halfwidth, halfwidth]
+                _MVLCR_STATE['spec'] = spectral_view(_tr_x, data['trainY'], _te_x, num_classes)
+                _MVLCR_STATE['num_classes'] = int(num_classes)
+                _perm = np.asarray(data['RandPerm'], dtype=np.int64)
+                _MVLCR_STATE['coords'] = (
+                    np.asarray(data['Row'], dtype=np.int64)[_perm] - halfwidth,
+                    np.asarray(data['Column'], dtype=np.int64)[_perm] - halfwidth)
+                _MVLCR_STATE['shape'] = (int(_MVLCR_STATE['coords'][0].max()) + halfwidth + 2,
+                                         int(_MVLCR_STATE['coords'][1].max()) + halfwidth + 2)
+                _mv_y = np.asarray(data['trainY']).astype(np.int64).ravel()
+                if _mv_y.min() == 1:
+                    _mv_y = _mv_y - 1
+                _MVLCR_STATE['prior'] = np.bincount(_mv_y, minlength=num_classes)[:num_classes].astype(np.float64)
+
 
         if (ep % num_epoch == 0) or args.eval_every_epoch:
             epoch_test_start = time.time()
