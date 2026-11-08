@@ -1708,6 +1708,10 @@ def test_model(test_loader, G, F1, F2, device, len_tar_dataset, args, seed, ssti
             _vnc = int(_base_p.shape[1])
             if ssti_context is not None and (getattr(args, 'ssti', False) or getattr(args, 'sepg', False)):
                 def _ssti_call(_lg, _ctx=ssti_context):
+                    import torch as _torch
+                    if not isinstance(_lg, _torch.Tensor):
+                        _lg = _torch.from_numpy(
+                            np.ascontiguousarray(_lg, dtype=np.float32))
                     return refine_labels(
                         _lg, _ctx, labels,
                         alpha=args.ssti_alpha, beta=args.ssti_beta,
