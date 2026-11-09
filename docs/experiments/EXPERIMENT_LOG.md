@@ -32,7 +32,7 @@
 | 1 | 2026-11-09 | RGS `independent_joint` | **81.31 ± 1.39** | 48.71 ± 1.39 | 91.63 ± 0.36 | vs SSTI+RATC：+1.08 / −0.52 / −0.52 |
 | 2 | 2026-11-09 | RGS `independent_agree` | 79.94 ± 0.62 | 48.93 ± 0.59 | **93.13 ± 1.30** | vs SSTI+RATC：−0.29 / −0.30 / **+0.98** |
 | 3 | 2026-11-09 | `agree + SV-TTA` | 79.94 ± 0.62 | 48.93 ± 0.59 | 93.13 ± 1.30 | SV-TTA 未触发，与 #2 相同 |
-| 4 | 2026-11-09 | `agree + rgs_class_cap 4`（仅 HyRANK） | — | **50.54 ± 1.42** | — | vs SSTI+RATC **+1.31** |
+| 4 | 2026-11-09 | `agree + rgs_class_cap 4`（仅 HyRANK） | — | **50.54 ± 1.35** | — | vs SSTI+RATC **+1.31** |
 | 5 | 2026-11-09 | `agree + rgs_class_cap 4`（Houston/Pavia） | **77.87 ± 3.06** | 50.54（同 #4） | 92.14 ± 1.89 | Houston **−2.36**（class0 崩）；Pavia ≈持平 |
 
 ---
@@ -107,17 +107,10 @@
 
 | 数据集 | OA（逐 seed） | OA mean±std | AA | Kappa | 逐类 |
 |---|---|---|---|---|---|
-| HyRANK | 50.07 / 49.49 / 52.06 | **50.54 ± 1.42** | **待补** | **待补** | **待补** |
+| HyRANK | 50.07 / 49.49 / 52.06 | **50.54 ± 1.35** | **61.00 ± 2.11** | **43.72 ± 1.27** | `[0] 49.19 | [1] 98.51 | [2] 90.59 | [3] 65.82 | [4] 70.74 | [5] 44.73 | [6] 34.55 | [7] 29.85 | [8] 23.76 | [9] 24.23 | [10] 100.00 | [11] 100.00` |
 
-- 补录命令（服务器上执行，把 AA/Kappa/逐类补进本表）：
-  ```bash
-  DIR=$(ls -dt /root/autodl-tmp/experiments/*_rgs_agree_svtta_v3 | head -1)
-  grep -E "average AA|average kappa|accuracy for each class|^Class " $DIR/logs/HyRANK_cap4.log
-  # 或
-  python /root/autodl-tmp/summarize_runs.py $DIR/logs/HyRANK_cap4.log --out $DIR/R_HyRANK_cap4.md
-  cat $DIR/R_HyRANK_cap4.md
-  ```
 - 对比 SSTI+RATC（49.23）：**+1.31**；对比 agree 无 cap（48.93）：**+1.61**
+- 与无 cap 相比，少数类明显恢复：class9 从 0.82% → **24.23%**，class8 21.78% → 23.76%，class0 71.18% → 49.19%（多数类略降）
 - 结论：类上限有效，验证"独立选样缺类平衡导致 HyRANK 掉点"的假设。
 
 ### 2026-11-09 修改 5：`agree + rgs_class_cap 4`（Houston / Pavia）
