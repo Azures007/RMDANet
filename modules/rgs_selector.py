@@ -22,7 +22,7 @@ import torch
 
 
 MODES = ("legacy", "independent_conf", "independent_agree",
-         "independent_proto", "independent_joint")
+         "independent_proto", "independent_joint", "independent_union")
 
 
 def _prototype_support(student_proj, labels, proto_state, eps=1e-8):
@@ -88,21 +88,34 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
 
         mask = conf >= float(getattr(args, "rgs_conf_threshold", 0.95))
 
-        if mode in ("independent_agree", "independent_joint") and f2_logits is not None:
+        agree_mask = None
+        if mode in ("independent_agree", "independent_joint", "independent_union") and f2_logits is not None:
             f2_pred = f2_logits.detach().argmax(dim=1)
-            agree = f2_pred.eq(pred)
-            stats["agree_rate"] = float(agree.float().mean().item())
-            mask = mask & agree
+            agree_mask = f2_pred.eq(pred)
+            stats["agree_rate"] = float(agree_mask.float().mean().item())
+            if mode != "independent_union":
+                mask = mask & agree_mask
 
         proto_mask = None
-        if mode in ("independent_proto", "independent_joint") and student_proj is not None:
+        if mode in ("independent_proto", "independent_joint", "independent_union") and student_proj is not None:
             support = _prototype_support(student_proj.detach(), pred,
                                          source_prototype_state)
             if support is not None:
                 margin, own_valid = support
                 proto_mask = (margin > 0) & own_valid
                 stats["proto_rate"] = float(proto_mask.float().mean().item())
-                mask = mask & proto_mask
+                if mode != "independent_union":
+                    mask = mask & proto_mask
+
+        if mode == "independent_union":
+            # union: agreement OR prototype support (whichever is available)
+            support = None
+            for part in (agree_mask, proto_mask):
+                if part is None:
+                    continue
+                support = part.clone() if support is None else (support | part)
+            if support is not None:
+                mask = mask & support
 
         idx = mask.nonzero(as_tuple=True)[0]
         if idx.numel() == 0:
