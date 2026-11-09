@@ -95,7 +95,7 @@ def _auto_tag(args, pred, num_classes, stats):
             # many-class long-tailed scene (e.g. HyRANK 12 classes): balance the
             # rare classes but cap the dominant ones.
             state["tag"] = "cap4"
-        elif frac_zero >= 0.15:
+        elif frac_zero >= 0.35:
             state["tag"] = "cap4"
         elif gini >= 0.72:
             state["tag"] = "agree"
@@ -185,7 +185,9 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
                 # balanced semantics: the fill backbone requires prototype
                 # support (this is what keeps Houston stable).
                 mask = mask & proto_mask
-            do_fill = tag in ("fill2", "cap4")
+            # fill2 = balanced min-2; cap4 = plain agreement + per-class cap 4
+            # (the configuration validated on HyRANK); agree = agreement only.
+            do_fill = tag == "fill2"
             if tag == "cap4" and cap_override <= 0:
                 cap_override = 4
 
