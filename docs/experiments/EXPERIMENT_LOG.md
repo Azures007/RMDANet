@@ -35,6 +35,7 @@
 | 4 | 2026-11-09 | `agree + rgs_class_cap 4`（仅 HyRANK） | — | **50.54 ± 1.35** | — | vs SSTI+RATC **+1.31** |
 | 5 | 2026-11-09 | `agree + rgs_class_cap 4`（Houston/Pavia） | **77.87 ± 3.06** | 50.54（同 #4） | 92.14 ± 1.89 | Houston **−2.36**（class0 崩）；Pavia ≈持平 |
 | 6 | 2026-11-09 | `independent_balanced`（min_per_class=2） | **81.73 ± 1.59** | 49.19 ± 0.74 | 91.40 ± 1.56 | vs SSTI+RATC：**+1.50** / −0.04 / **−0.75**；Houston 最好，Pavia 掉点 |
+| 7 | 2026-11-09 | `independent_balanced`（min_per_class=**1**） | 80.17 ± 0.94 | **49.56 ± 0.92** | 91.90 ± 2.01 | vs SSTI+RATC：−0.06 / **+0.33** / −0.25；最均衡，接近统一配置 |
 
 ---
 
@@ -157,6 +158,29 @@
 
 - 结论：Houston 最好（+1.50），HyRANK 持平，Pavia 掉 0.75（原型填充在 Pavia 上触发，与 joint 模式同样的问题）。
 - 下一步：`--rgs_min_per_class 1`（仅当某类 0 样本时才补 1 个），预期 Pavia 接近 agree（93.13），Houston/HyRANK 保留收益。
+
+### 2026-11-09 修改 7：`independent_balanced`（`--rgs_min_per_class 1`）
+
+- 运行配置：`--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_balanced --rgs_min_per_class 1`
+- 实验目录：`/root/autodl-tmp/experiments/20261109-102859_rgs_bal_min1`
+
+**Houston**
+- OA：81.24 / 79.79 / 79.48 → **80.17 ± 0.94**（vs SSTI+RATC −0.06，vs TAPDA +1.24，3/3 正）
+- AA：75.88 ± 3.93；Kappa：69.04 ± 1.26
+- 逐类：`[0] 59.15 | [1] 75.70 | [2] 63.06 | [3] 83.33 | [4] 82.43 | [5] 81.70 | [6] 85.77`
+
+**HyRANK**
+- OA：49.13 / 50.62 / 48.94 → **49.56 ± 0.92**（vs SSTI+RATC **+0.33**，vs TAPDA +0.76）
+- AA：59.03 ± 1.26；Kappa：42.55 ± 0.82
+- 逐类：`[0] 58.45 | [1] 100.00 | [2] 85.98 | [3] 60.34 | [4] 70.09 | [5] 43.07 | [6] 33.97 | [7] 30.97 | [8] 24.75 | [9] 0.75 | [10] 100.00 | [11] 100.00`
+
+**Pavia**
+- OA：91.25 / 94.15 / 90.30 → **91.90 ± 2.01**（vs SSTI+RATC **−0.25**，vs TAPDA +0.76）
+- AA：92.69 ± 1.75；Kappa：90.30 ± 1.95
+- 逐类：`[0] 93.23 | [1] 98.57 | [2] 90.99 | [3] 77.58 | [4] 99.71 | [5] 97.62 | [6] 91.14`
+
+- 结论：min=1 是目前最均衡的配置（−0.06 / +0.33 / −0.25），但仍未做到三数据集全部 ≥ SSTI+RATC。
+- 对比 min=2：Houston −1.56、HyRANK +0.37、Pavia +0.50。
 
 ## 待测配置（下一步）
 
