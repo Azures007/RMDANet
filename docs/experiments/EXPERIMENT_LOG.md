@@ -10,7 +10,8 @@
 |---|---|---|---|---|---|---|---|
 | 1 | 2026-11-09 | RGS v2 `independent_joint` | `--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_joint` | **81.31 ± 1.39** | 48.71 ± 1.39 | 91.63 ± 0.36 | vs SSTI+RATC：+1.08 / −0.52 / −0.52 |
 | 2 | 2026-11-09 | RGS v2 `independent_agree` | `--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_agree` | 79.94 ± 0.62 | 48.93 ± 0.59 | **93.13 ± 1.30** | vs SSTI+RATC：−0.29 / −0.30 / **+0.98（3/3 正）** |
-| 3 | - | - | - | - | - | - | - |
+| 3 | 2026-11-09 | `agree + SV-TTA`（rgs2sv） | 同上 + `--svtta` | 79.94 ± 0.62 | 48.93 ± 0.59 | 93.13 ± 1.30 | SV-TTA 未触发，与 #2 完全一致 |
+| 4 | 2026-11-09 | `agree + rgs_class_cap 4`（HyRANK） | 同上 + `--rgs_class_cap 4` | — | **50.54 ± 1.42** | — | vs SSTI+RATC **+1.31**，vs 无 cap **+1.61** ✅ |
 
 ## 详细记录
 
@@ -33,6 +34,17 @@
 - 对比 SSTI+RATC：Houston −0.29，HyRANK −0.30，Pavia **+0.98**
 - 结论：不带原型的独立选样在 Pavia 上最好（+0.98）；Houston 的 class0 在无原型约束时崩到 35.99%。
 
+### 2026-11-09 修改 3：agree + SV-TTA（rgs2sv 分支）
+- 修复过程：rgs2 分支缺 `modules/svtta.py` → 补文件（UTF-8 无 BOM）；SV-TTA 按 cns 风格接入 RATC 的 TENT 分支。
+- 结果（`/root/autodl-tmp/experiments/*_rgs_agree_svtta_v3`）：与 #2 完全一致（79.94 / 48.93 / 93.13）
+- 结论：SV-TTA 在这三个数据集上未触发拒绝（TENT 分支未被拒绝），对结果无影响。
+
+### 2026-11-09 修改 4：HyRANK + `--rgs_class_cap 4`
+- 运行配置：`--ssti --ratc --svtta --reliab_ce_weight 0.05 --rgs_selector independent_agree --rgs_class_cap 4`
+- 结果：HyRANK 50.07 / 49.49 / 52.06 → **50.54 ± 1.42**
+- 对比 SSTI+RATC（49.23）：**+1.31**；对比 agree 无 cap（48.93）：**+1.61**
+- 结论：类上限有效，验证了"独立选样缺类平衡导致 HyRANK 掉点"的假设。
+
 ### 选样统计（来自 joint 日志）
 - HyRANK：每 batch 32 样本，选 8–21 个（约 25%–65%），proto 通过率 0.50–0.88；
 - Pavia：每 batch 32 样本，选 19–30 个（约 60%–94%），proto 通过率 0.75–0.97。
@@ -41,9 +53,14 @@
 
 | 配置 | 目的 |
 |---|---|
-| `independent_agree --svtta` | 用 SV-TTA 修复 HyRANK 的 TENT 误选，看能否补齐 HyRANK |
-| `independent_agree --rgs_class_cap 4` | 类上限，改善 HyRANK 少数类覆盖 |
-| `independent_joint --svtta` | 保留 Houston 收益 + 修 HyRANK |
+| `agree + class_cap 4`：Houston、Pavia | 确认类上限是否对三数据集都有效 → 若有效即得到统一配置 |
+| `joint + class_cap 4` | 对照 |
+| class_cap 取 2 / 8 | 敏感性 |
+
+当前最优（分数据集）：
+- Houston：`independent_joint`（81.31，+1.08）
+- HyRANK：`independent_agree + class_cap 4`（50.54，+1.31）
+- Pavia：`independent_agree`（93.13，+0.98）
 
 ## 记录模板
 
