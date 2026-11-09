@@ -362,12 +362,15 @@ def build_parser():
                             help='tail-aware entropy regulariser replacing BNM')
     ours_group.add_argument('--rgs_selector', default='legacy',
                             choices=['legacy', 'independent_conf', 'independent_agree',
-                                     'independent_proto', 'independent_joint', 'independent_union'],
+                                     'independent_proto', 'independent_joint', 'independent_union',
+                                     'independent_balanced'],
                             help='independent target-domain CE selection for RGS')
     ours_group.add_argument('--rgs_conf_threshold', default=0.95, type=float)
     ours_group.add_argument('--rgs_weight_mode', default='teacher_conf',
                             choices=['uniform', 'teacher_conf'])
     ours_group.add_argument('--rgs_class_cap', default=0, type=int)
+    ours_group.add_argument('--rgs_min_per_class', default=2, type=int,
+                            help='balanced fill: minimum selected samples per class')
     ours_group.add_argument('--svtta', action='store_true', default=False,
                             help='self-verifying TTA: reject corrections that break spatial consistency')
     ours_group.add_argument('--svtta_margin', default=0.005, type=float)

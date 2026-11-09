@@ -22,7 +22,8 @@ import torch
 
 
 MODES = ("legacy", "independent_conf", "independent_agree",
-         "independent_proto", "independent_joint", "independent_union")
+         "independent_proto", "independent_joint", "independent_union",
+         "independent_balanced")
 
 
 def _prototype_support(student_proj, labels, proto_state, eps=1e-8):
@@ -89,7 +90,8 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
         mask = conf >= float(getattr(args, "rgs_conf_threshold", 0.95))
 
         agree_mask = None
-        if mode in ("independent_agree", "independent_joint", "independent_union") and f2_logits is not None:
+        if mode in ("independent_agree", "independent_joint", "independent_union",
+                   "independent_balanced") and f2_logits is not None:
             f2_pred = f2_logits.detach().argmax(dim=1)
             agree_mask = f2_pred.eq(pred)
             stats["agree_rate"] = float(agree_mask.float().mean().item())
@@ -97,7 +99,8 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
                 mask = mask & agree_mask
 
         proto_mask = None
-        if mode in ("independent_proto", "independent_joint", "independent_union") and student_proj is not None:
+        if mode in ("independent_proto", "independent_joint", "independent_union",
+                   "independent_balanced") and student_proj is not None:
             support = _prototype_support(student_proj.detach(), pred,
                                          source_prototype_state)
             if support is not None:
@@ -116,6 +119,38 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
                 support = part.clone() if support is None else (support | part)
             if support is not None:
                 mask = mask & support
+
+        # balanced fill: keep the agreement-based selection as the backbone and
+        # only top up classes that are under-represented, preferring samples
+        # that the source prototypes support (never removes majority samples).
+        if mode == "independent_balanced":
+            base = mask.clone()
+            if proto_mask is not None:
+                fill_pool = mask | (conf.new_zeros(mask.shape, dtype=torch.bool))
+            else:
+                fill_pool = mask
+            min_per_class = int(getattr(args, "rgs_min_per_class", 2))
+            if min_per_class > 0:
+                for c in range(int(num_classes)):
+                    own = base & (pred == c)
+                    have = int(own.sum().item())
+                    if have >= min_per_class:
+                        continue
+                    need = min_per_class - have
+                    candidates = ((pred == c) & (conf >= float(getattr(args, "rgs_conf_threshold", 0.95)))
+                                  & (~base))
+                    if proto_mask is not None:
+                        candidates = candidates & proto_mask
+                    if int(candidates.sum().item()) == 0 and proto_mask is not None:
+                        candidates = ((pred == c) & (conf >= float(getattr(args, "rgs_conf_threshold", 0.95)))
+                                      & (~base))
+                    if int(candidates.sum().item()) == 0:
+                        continue
+                    idx_c = candidates.nonzero(as_tuple=True)[0]
+                    order = conf[idx_c].argsort(descending=True)
+                    chosen = idx_c[order[:need]]
+                    base[chosen] = True
+                mask = base
 
         idx = mask.nonzero(as_tuple=True)[0]
         if idx.numel() == 0:
