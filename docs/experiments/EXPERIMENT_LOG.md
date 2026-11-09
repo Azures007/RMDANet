@@ -12,6 +12,7 @@
 | 2 | 2026-11-09 | RGS v2 `independent_agree` | `--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_agree` | 79.94 ± 0.62 | 48.93 ± 0.59 | **93.13 ± 1.30** | vs SSTI+RATC：−0.29 / −0.30 / **+0.98（3/3 正）** |
 | 3 | 2026-11-09 | `agree + SV-TTA`（rgs2sv） | 同上 + `--svtta` | 79.94 ± 0.62 | 48.93 ± 0.59 | 93.13 ± 1.30 | SV-TTA 未触发，与 #2 完全一致 |
 | 4 | 2026-11-09 | `agree + rgs_class_cap 4`（HyRANK） | 同上 + `--rgs_class_cap 4` | — | **50.54 ± 1.42** | — | vs SSTI+RATC **+1.31**，vs 无 cap **+1.61** ✅ |
+| 5 | 2026-11-09 | `agree + rgs_class_cap 4`（Houston/Pavia） | 同上 + `--rgs_class_cap 4` | **77.87 ± 3.06**（74.95/77.60/81.05） | 50.54（同 #4） | 92.14 ± 1.89（90.30/94.07/92.04） | Houston **−2.36**（class0 崩到 8.45%）；Pavia ≈持平（−0.01） |
 
 ## 详细记录
 
@@ -53,7 +54,7 @@
 
 | 配置 | 目的 |
 |---|---|
-| `agree + class_cap 4`：Houston、Pavia | 确认类上限是否对三数据集都有效 → 若有效即得到统一配置 |
+| `independent_union`（conf & (agree \| proto)）三个数据集 3 seed | 不用硬类上限，靠"一致性或原型"来兼顾 Houston 的 class0 与 HyRANK/Pavia 的覆盖率 |
 | `joint + class_cap 4` | 对照 |
 | class_cap 取 2 / 8 | 敏感性 |
 
@@ -61,6 +62,8 @@
 - Houston：`independent_joint`（81.31，+1.08）
 - HyRANK：`independent_agree + class_cap 4`（50.54，+1.31）
 - Pavia：`independent_agree`（93.13，+0.98）
+
+统一配置尚未找到（cap4 伤 Houston；joint 伤 HyRANK/Pavia）。
 
 ## 记录模板
 
