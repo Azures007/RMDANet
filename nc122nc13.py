@@ -330,7 +330,7 @@ def build_parser():
                             help='tail-aware entropy regulariser replacing BNM')
     ours_group.add_argument('--rgs_selector', default='legacy',
                             choices=['legacy', 'independent_conf', 'independent_agree',
-                                     'independent_proto', 'independent_joint'],
+                                     'independent_proto', 'independent_joint', 'independent_union'],
                             help='independent target-domain CE selection for RGS')
     ours_group.add_argument('--rgs_conf_threshold', default=0.95, type=float)
     ours_group.add_argument('--rgs_weight_mode', default='teacher_conf',
