@@ -331,3 +331,25 @@ Full 与 c0783a7 基线逐位一致（Pavia 83.62 / HyRANK 54.10 / Houston 76.98
 
 - Houston seed 1239 复测同模式（Base 74.57 / +PRAT 76.02 / +PRAT+DRSE 74.39），排除 seed 偶然性。
 - **问题：Full 在三个数据集上都不是最高**——DRSE/RTML 在 Houston/HyRANK 上有害，需方法层面处理（自适应门控或重新定位），不能靠调整消融顺序。
+
+### 2026-11-10 附：SSE_SDA（xiaorong）旧消融表复现失败排查
+
+**目标**：复现 `xiaorong/PTMDA-Net_SSE_SDA_Final/ablation_8_seed1233/run_all.log` 的 Houston 结果
+（Baseline 77.64 / +RFTM 77.47 / +RFTM+DRSE 80.32 / Full 80.52，seed 1233）。
+
+已排除的变量：
+
+| 变量 | 证据 |
+|---|---|
+| 训练参数 | 9/27 旧 run 与本次 run 的 `training_config.json` diff 仅 data_path/save_path |
+| 数据 | Houston13.mat / Houston18.mat md5 完全相同（`/root/autodl-tmp/Datasets` 是 v7.0 目录软链接） |
+| 代码 | `train_standalone_uda.py`(e63eecbf)、model、prat、memory md5 完全相同；`data.py.bak_orig` = 9/27 CLEAN 包 `c74aeb3d` |
+| 环境变量 | 按旧脚本设置 `PYTHONHASHSEED/OMP/MKL/CUBLAS_WORKSPACE_CONFIG/CUDA_DEVICE_MAX_CONNECTIONS` 后不变 |
+| Python 环境 | base（0.5755）、clda numpy1.23（0.5755）、dann-houston torch2.14（0.5804）均未命中旧值 |
+| 旧容器 | `c9834981…` 已销毁 |
+
+**结果**：旧日志 epoch10 loss=0.546883，本机各环境均为 0.5755~0.5804；OA 77.64 vs 79.52~79.84。
+
+**结论**：旧表产生于已销毁的容器/运行时（GPU 与 CUDA 驱动栈不同），确定性训练只保证同机可复现。**旧表作废**；后续三数据集消融统一在当前机器重跑，并注明硬件与版本（RTX 4090 / torch 2.8.0+cu128 / seed 1233）。
+
+> Pavia 67 分问题的根因也已定位：SSE_SDA 的 4 行脚本把 `RTML off` 实现为"完全关闭目标伪标签自训练"（v3.0 语义是 `pseudo_mode=current` 仍保留自训练）。用 `run_ablation_4rows_v3.py`（RTML 只切换 history/current）后 Pavia 的 PRAT 增益才能体现（v3.0 线实测 Base 66.69 → +PRAT 83.59）。
