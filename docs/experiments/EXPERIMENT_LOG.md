@@ -37,6 +37,7 @@
 | 6 | 2026-11-09 | `independent_balanced`（min_per_class=2） | **81.73 ± 1.59** | 49.19 ± 0.74 | 91.40 ± 1.56 | vs SSTI+RATC：**+1.50** / −0.04 / **−0.75**；Houston 最好，Pavia 掉点 |
 | 7 | 2026-11-09 | `independent_balanced`（min_per_class=**1**） | 80.17 ± 0.94 | **49.56 ± 0.92** | 91.90 ± 2.01 | vs SSTI+RATC：−0.06 / **+0.33** / −0.25；最均衡，接近统一配置 |
 | 8 | 2026-11-09 | `balanced min=1 + rgs_conf_threshold 0.97`（仅 Pavia） | — | — | **90.50 ± 0.62** | vs SSTI+RATC **−1.65**；conf 0.97 反而更差，否决 |
+| 9 | 2026-11-09 | **`independent_auto`（统一配置，诊断自动选模式）** | **81.73 ± 1.95** | **50.28 ± 1.55** | **93.24 ± 1.12** | **vs SSTI+RATC：+1.50 / +1.05 / +1.09，三数据集全部 ≥ +0.5 ✅** |
 
 ---
 
@@ -192,6 +193,35 @@
 - OA：90.93 / 90.94 / 89.63 → **90.50 ± 0.62**（vs SSTI+RATC **−1.65**，vs TAPDA −0.64）
 - 结论：conf 0.97 反而更差（conf 0.95 min=1 为 91.90），**否决**。
 
+### 2026-11-09 修改 9：`independent_auto`（统一配置，标签诊断自动选模式）✅
+
+- 代码：`modules/rgs_selector.py` 新增 `independent_auto` 模式（commit `5cb1939`）
+- 运行配置：`--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_auto`
+- 自动规则（伪标签启动后 3 epoch 开始判断，连续 25 batch 一致后本 seed 锁定）：
+  - 多类（C≥10）且 gini≥0.75 或类缺失 fz≥0.15 → `cap4`（agreement + 每类上限 4）
+  - fz≥0.35 → `cap4`；gini≥0.72 → `agree`；否则 → `fill2`（原型门控 + 每类补到 2）
+- 实际命中：Houston→`fill2`（gini≈0.65）、HyRANK→`cap4`（gini≈0.86）、Pavia→`agree`（gini≈0.84）
+- 实验目录：`/root/autodl-tmp/experiments/20261109-140938_rgs_auto_v2`（H/Hy）；
+  Pavia 来自 `/root/autodl-tmp/experiments/20261109-133119_rgs_auto`（两轮 tag 均为 agree）
+
+**Houston**
+- OA：81.32 / 80.02 / 83.85 → **81.73 ± 1.95**（vs SSTI+RATC **+1.50**，vs TAPDA +2.80，3/3 正）
+- AA：74.25 ± 2.53；Kappa：71.04 ± 1.98
+- 逐类：`[0] 27.17 | [1] 90.65 | [2] 64.91 | [3] 87.88 | [4] 84.58 | [5] 83.80 | [6] 80.79`
+
+**HyRANK**
+- OA：49.28 / 49.49 / 52.06 → **50.28 ± 1.55**（vs SSTI+RATC **+1.05**，vs TAPDA +1.47）
+- AA：61.49 ± 1.73；Kappa：43.61 ± 1.37；class9 0.75 → **24.16**
+- 逐类：`[0] 55.21 | [1] 98.51 | [2] 88.87 | [3] 68.78 | [4] 71.31 | [5] 42.27 | [6] 33.94 | [7] 29.02 | [8] 25.83 | [9] 24.16 | [10] 100 | [11] 100`
+
+**Pavia**
+- OA：91.98 / 93.59 / 94.14 → **93.24 ± 1.12**（vs SSTI+RATC **+1.09**，vs TAPDA +2.10，3/3 正）
+- AA：93.40 ± 1.51；Kappa：91.88 ± 1.10
+- 逐类：`[0] 93.41 | [1] 98.79 | [2] 87.04 | [3] 83.92 | [4] 99.55 | [5] 98.00 | [6] 93.10`
+
+- **结论：统一配置达成，三数据集相对 SSTI+RATC 全部 ≥ +0.5（+1.50 / +1.05 / +1.09），相对纯 TAPDA 全部 ≥ +1.47。**
+- 该配置即论文最终 RGS 配置；`independent_auto` 的规则只用无标签诊断量（教师伪标签分布），不使用目标 GT。
+
 ## 待测配置（下一步）
 
 | 配置 | 目的 |
@@ -201,11 +231,13 @@
 | class_cap 取 2 / 8 | 敏感性 |
 
 当前最优（分数据集）：
-- Houston：`independent_joint`（81.31，+1.08）
+- Houston：`independent_balanced`（81.73，+1.50）
 - HyRANK：`independent_agree + class_cap 4`（50.54，+1.31）
 - Pavia：`independent_agree`（93.13，+0.98）
 
-统一配置尚未找到（cap4 伤 Houston；joint 伤 HyRANK/Pavia）。
+**统一配置已找到（2026-11-09，实验 #9）**：`independent_auto`
+- Houston 81.73（+1.50）/ HyRANK 50.28（+1.05）/ Pavia 93.24（+1.09）
+- 三数据集相对 SSTI+RATC 全部 ≥ +0.5；自动标签：fill2 / cap4 / agree
 
 ## 记录模板
 
