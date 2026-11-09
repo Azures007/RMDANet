@@ -181,6 +181,10 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
         cap_override = int(getattr(args, "rgs_class_cap", 0))
         if mode == "independent_auto":
             tag = _auto_tag(args, pred, num_classes, stats)
+            if tag == "fill2" and proto_mask is not None:
+                # balanced semantics: the fill backbone requires prototype
+                # support (this is what keeps Houston stable).
+                mask = mask & proto_mask
             do_fill = tag in ("fill2", "cap4")
             if tag == "cap4" and cap_override <= 0:
                 cap_override = 4
