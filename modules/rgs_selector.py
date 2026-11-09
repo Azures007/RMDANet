@@ -88,8 +88,14 @@ def _auto_tag(args, pred, num_classes, stats):
     probs = [c / total for c in state["counts"]]
     gini = 1.0 - sum(p * p for p in probs)
     frac_zero = sum(1 for c in state["counts"] if c / total < 0.01) / max(1, num_classes)
+    # long-tail fraction: classes holding < 2% of the pseudo-label mass
+    frac_tiny = sum(1 for c in state["counts"] if c / total < 0.02) / max(1, num_classes)
     if state["calls"] >= 2:
-        if frac_zero >= 0.15:
+        if num_classes >= 10 and (frac_zero >= 0.15 or frac_tiny >= 0.2):
+            # many-class long-tailed scene (e.g. HyRANK 12 classes): balance the
+            # rare classes but cap the dominant ones.
+            state["tag"] = "cap4"
+        elif frac_zero >= 0.15:
             state["tag"] = "cap4"
         elif gini >= 0.72:
             state["tag"] = "agree"
@@ -98,6 +104,7 @@ def _auto_tag(args, pred, num_classes, stats):
     stats["auto_tag"] = state["tag"]
     stats["auto_gini"] = round(gini, 4)
     stats["auto_frac_zero"] = round(frac_zero, 4)
+    stats["auto_frac_tiny"] = round(frac_tiny, 4)
     return state["tag"]
 
 
