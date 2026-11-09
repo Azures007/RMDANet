@@ -186,3 +186,32 @@
 - 对比 SSTI+RATC（80.23 / 49.23 / 92.15）：
 - 结论：
 ```
+
+---
+
+## 附：旧模型线（main）基线复现验证
+
+### 2026-11-09 基线复现：RMDANet v3.0 / BASELINE_V3 Houston（seed 1237）
+
+- 代码版本：`main` @ `b2fcdde`（= tag v3.0 `c0783a7` 的备份配置）
+- 运行命令：
+  ```bash
+  python -u scripts/run_v71.py houston C0 1237 \
+    --data-root /root/autodl-tmp/Datasets --epochs 50 --workers 4 \
+    --out-root results_v71/repro_houston
+  python -u scripts/final_eval_locked.py \
+    --checkpoint results_v71/repro_houston/houston/C0_epochs50_seed1237/selected_model.pt \
+    --data-path /root/autodl-tmp/Datasets/Houston \
+    --output results_v71/repro_houston/houston/C0_epochs50_seed1237/target_final_once.json \
+    --confirm-final-eval
+  ```
+- 复现结果 vs BASELINE_V3：
+
+| 指标 | BASELINE_V3 | 本次复现 | 差 |
+|---|---|---|---|
+| OA | 76.72 | **76.98** | +0.26 |
+| AA | 82.28 | 82.38 | +0.10 |
+| Kappa | 0.6497 | 0.6532 | +0.0035 |
+
+- 逐类：84.63 / 92.82 / 67.86 / 100.00 / 86.05 / 74.81 / 70.49
+- 结论：基线可复现，差异属单 seed 运行的正常非确定性（AMP/cuDNN + workers=4 的 RNG 流）。
