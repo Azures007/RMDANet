@@ -299,3 +299,35 @@
   - 数据未变（counts 与 README 一致、mtime 2020/2022），环境未变（torch 2025-08 安装、机器 2026-05 启动）；
   - `v3lite` checkpoint 的权重 hash 为 `ed1d29…`（不同），但其 args 与当前仅差 `save_path` → **v3lite 是另一份源码快照跑出来的**（当时工作区改动未提交，或不同分支），**不是环境问题**。
 - 结论：**当前可确定性复现的 v3.0 基线 = 83.62 / 54.10 / 76.98**（单 seed 1237）；85.55 那组源码快照待找回（候选：`de1e5ca "revert to v3.0 baseline (best 85.55...)"`）。
+
+### 2026-11-09 旧模型线（v3.0）三数据集组件消融（seed 1237，ablation 分支）
+
+代码：`ablation` 分支（= `RMDANet_v30-ablation_20261103-1814`，带 `--ablate_prat/drse/rtml`）
+运行：`run_v71.py <ds> C0 1237 --epochs 50 --workers 4 --ablate-*`
+Full 与 c0783a7 基线逐位一致（Pavia 83.62 / HyRANK 54.10 / Houston 76.98），消融代码等价可信。
+
+| 数据集 | 配置 | OA | AA | Kappa |
+|---|---|---|---|---|
+| Houston | Base（全关） | 73.89 | 76.82 | 0.6115 |
+| Houston | +PRAT | **77.62** | 82.35 | 0.6593 |
+| Houston | +PRAT+DRSE | 76.44 | 82.13 | 0.6437 |
+| Houston | Full | 76.98 | 82.38 | 0.6532 |
+| Pavia | Base | 66.69 | 68.55 | 0.6086 |
+| Pavia | +PRAT | 83.59 | 81.52 | 0.8031 |
+| Pavia | +PRAT+DRSE | **84.16** | 80.11 | 0.8089 |
+| Pavia | Full | 83.62 | 79.22 | 0.8021 |
+| HyRANK | Base | 56.54 | 64.79 | 0.4905 |
+| HyRANK | +PRAT | **59.80** | 64.75 | 0.5255 |
+| HyRANK | +PRAT+DRSE | 54.23 | 61.95 | 0.4660 |
+| HyRANK | Full | 54.10 | 60.00 | 0.4615 |
+
+组件增量（相对上一行）：
+
+| 组件 | Houston | Pavia | HyRANK | 结论 |
+|---|---|---|---|---|
+| PRAT | +3.73 | +16.90 | +3.26 | ✅ 三数据集全正 |
+| DRSE | −1.18 | +0.57 | **−5.57** | ❌ 仅 Pavia 正 |
+| RTML | +0.54 | −0.54 | −0.13 | ❌ 仅 Houston 微正 |
+
+- Houston seed 1239 复测同模式（Base 74.57 / +PRAT 76.02 / +PRAT+DRSE 74.39），排除 seed 偶然性。
+- **问题：Full 在三个数据集上都不是最高**——DRSE/RTML 在 Houston/HyRANK 上有害，需方法层面处理（自适应门控或重新定位），不能靠调整消融顺序。
