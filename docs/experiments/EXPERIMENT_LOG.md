@@ -36,6 +36,7 @@
 | 5 | 2026-11-09 | `agree + rgs_class_cap 4`（Houston/Pavia） | **77.87 ± 3.06** | 50.54（同 #4） | 92.14 ± 1.89 | Houston **−2.36**（class0 崩）；Pavia ≈持平 |
 | 6 | 2026-11-09 | `independent_balanced`（min_per_class=2） | **81.73 ± 1.59** | 49.19 ± 0.74 | 91.40 ± 1.56 | vs SSTI+RATC：**+1.50** / −0.04 / **−0.75**；Houston 最好，Pavia 掉点 |
 | 7 | 2026-11-09 | `independent_balanced`（min_per_class=**1**） | 80.17 ± 0.94 | **49.56 ± 0.92** | 91.90 ± 2.01 | vs SSTI+RATC：−0.06 / **+0.33** / −0.25；最均衡，接近统一配置 |
+| 8 | 2026-11-09 | `balanced min=1 + rgs_conf_threshold 0.97`（仅 Pavia） | — | — | **90.50 ± 0.62** | vs SSTI+RATC **−1.65**；conf 0.97 反而更差，否决 |
 
 ---
 
@@ -181,6 +182,15 @@
 
 - 结论：min=1 是目前最均衡的配置（−0.06 / +0.33 / −0.25），但仍未做到三数据集全部 ≥ SSTI+RATC。
 - 对比 min=2：Houston −1.56、HyRANK +0.37、Pavia +0.50。
+
+### 2026-11-09 修改 8：`balanced min=1 + rgs_conf_threshold 0.97`（仅 Pavia，失败）
+
+- 运行配置：`--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_balanced --rgs_min_per_class 1 --rgs_conf_threshold 0.97`
+- 目的：提高填充门槛，减少 Pavia 被原型样本稀释
+
+**Pavia**
+- OA：90.93 / 90.94 / 89.63 → **90.50 ± 0.62**（vs SSTI+RATC **−1.65**，vs TAPDA −0.64）
+- 结论：conf 0.97 反而更差（conf 0.95 min=1 为 91.90），**否决**。
 
 ## 待测配置（下一步）
 
