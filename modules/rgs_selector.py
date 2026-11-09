@@ -58,7 +58,7 @@ def _prototype_support(student_proj, labels, proto_state, eps=1e-8):
     return margin, own_valid
 
 
-def _auto_tag(args, pred, num_classes, stats):
+def _auto_tag(args, pred, num_classes, stats, ep=1):
     """Label-free diagnostic: class-distribution Gini + missing-class fraction.
 
     The histogram of the teacher pseudo-label distribution is tracked with an
@@ -66,11 +66,15 @@ def _auto_tag(args, pred, num_classes, stats):
     Pavia) means prototype top-up hurts, so plain agreement is used; a flat
     distribution with missing classes (e.g. Houston rare classes / HyRANK 12
     classes) means the selection needs balancing and a per-class cap.
+
+    The tag is decided once, a few epochs after pseudo-labels start, and then
+    frozen for the rest of the run (early pseudo-label histograms are noisy).
     """
     num_classes = int(num_classes)
     state = getattr(args, "_rgs_auto_state", None)
     if state is None:
-        state = {"counts": [0.0] * num_classes, "calls": 0, "tag": "fill2"}
+        state = {"counts": [0.0] * num_classes, "calls": 0, "tag": "fill2",
+                 "decided": False, "late_calls": 0}
         try:
             setattr(args, "_rgs_auto_state", state)
         except Exception:
@@ -90,10 +94,16 @@ def _auto_tag(args, pred, num_classes, stats):
     frac_zero = sum(1 for c in state["counts"] if c / total < 0.01) / max(1, num_classes)
     # long-tail fraction: classes holding < 2% of the pseudo-label mass
     frac_tiny = sum(1 for c in state["counts"] if c / total < 0.02) / max(1, num_classes)
-    if state["calls"] >= 2:
-        if num_classes >= 10 and (frac_zero >= 0.15 or frac_tiny >= 0.2):
-            # many-class long-tailed scene (e.g. HyRANK 12 classes): balance the
-            # rare classes but cap the dominant ones.
+
+    pseudo_start = int(getattr(args, "pseudo_start_epoch", 0) or 0)
+    late = ep >= pseudo_start + 3
+    if late:
+        state["late_calls"] += 1
+
+    if (not state["decided"]) and late and state["late_calls"] >= 25:
+        if num_classes >= 10 and (gini >= 0.75 or frac_zero >= 0.15 or frac_tiny >= 0.2):
+            # many-class long-tailed scene (e.g. HyRANK 12 classes): cap the
+            # dominant classes but keep the agreement gate.
             state["tag"] = "cap4"
         elif frac_zero >= 0.35:
             state["tag"] = "cap4"
@@ -101,6 +111,8 @@ def _auto_tag(args, pred, num_classes, stats):
             state["tag"] = "agree"
         else:
             state["tag"] = "fill2"
+        state["decided"] = True
+
     stats["auto_tag"] = state["tag"]
     stats["auto_gini"] = round(gini, 4)
     stats["auto_frac_zero"] = round(frac_zero, 4)
@@ -180,7 +192,7 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
         do_fill = mode == "independent_balanced"
         cap_override = int(getattr(args, "rgs_class_cap", 0))
         if mode == "independent_auto":
-            tag = _auto_tag(args, pred, num_classes, stats)
+            tag = _auto_tag(args, pred, num_classes, stats, ep=ep)
             if tag == "fill2" and proto_mask is not None:
                 # balanced semantics: the fill backbone requires prototype
                 # support (this is what keeps Houston stable).
