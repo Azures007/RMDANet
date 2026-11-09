@@ -11,6 +11,11 @@ not need.  This module implements an *independent* selector that builds
     independent_agree : confidence + teacher/F2 class agreement
     independent_proto : confidence + source-prototype margin support
     independent_joint : confidence + agreement + prototype support
+    independent_union : confidence + (agreement OR prototype support)
+    independent_balanced : agreement backbone + prototype top-up for classes
+                           with fewer than ``rgs_min_per_class`` samples
+    independent_auto  : label-free diagnostic chooses between
+                        {agree, balanced(fill 2), balanced(fill 2)+class cap 4}
 
 All tensors are detached; the selector never builds a graph and never touches
 target ground truth.
@@ -23,7 +28,7 @@ import torch
 
 MODES = ("legacy", "independent_conf", "independent_agree",
          "independent_proto", "independent_joint", "independent_union",
-         "independent_balanced")
+         "independent_balanced", "independent_auto")
 
 
 def _prototype_support(student_proj, labels, proto_state, eps=1e-8):
@@ -51,6 +56,49 @@ def _prototype_support(student_proj, labels, proto_state, eps=1e-8):
     margin = own - best_other
     own_valid = valid[labels]
     return margin, own_valid
+
+
+def _auto_tag(args, pred, num_classes, stats):
+    """Label-free diagnostic: class-distribution Gini + missing-class fraction.
+
+    The histogram of the teacher pseudo-label distribution is tracked with an
+    EMA over batches.  A concentrated distribution (high Gini-Simpson, e.g.
+    Pavia) means prototype top-up hurts, so plain agreement is used; a flat
+    distribution with missing classes (e.g. Houston rare classes / HyRANK 12
+    classes) means the selection needs balancing and a per-class cap.
+    """
+    num_classes = int(num_classes)
+    state = getattr(args, "_rgs_auto_state", None)
+    if state is None:
+        state = {"counts": [0.0] * num_classes, "calls": 0, "tag": "fill2"}
+        try:
+            setattr(args, "_rgs_auto_state", state)
+        except Exception:
+            pass
+    hist = torch.bincount(pred, minlength=num_classes).float().tolist()
+    hist = (hist + [0.0] * num_classes)[:num_classes]
+    if state["calls"] == 0:
+        state["counts"] = list(hist)
+    else:
+        for i in range(num_classes):
+            state["counts"][i] = 0.9 * state["counts"][i] + 0.1 * hist[i]
+    state["calls"] += 1
+
+    total = float(sum(state["counts"])) or 1.0
+    probs = [c / total for c in state["counts"]]
+    gini = 1.0 - sum(p * p for p in probs)
+    frac_zero = sum(1 for c in state["counts"] if c / total < 0.01) / max(1, num_classes)
+    if state["calls"] >= 2:
+        if frac_zero >= 0.15:
+            state["tag"] = "cap4"
+        elif gini >= 0.72:
+            state["tag"] = "agree"
+        else:
+            state["tag"] = "fill2"
+    stats["auto_tag"] = state["tag"]
+    stats["auto_gini"] = round(gini, 4)
+    stats["auto_frac_zero"] = round(frac_zero, 4)
+    return state["tag"]
 
 
 def select_rgs_samples(teacher_pred=None, teacher_conf=None,
@@ -87,11 +135,12 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
         pred = (teacher_pred.detach().long().view(-1)
                 if teacher_pred is not None else conf.new_zeros(n, dtype=torch.long))
 
-        mask = conf >= float(getattr(args, "rgs_conf_threshold", 0.95))
+        conf_thr = float(getattr(args, "rgs_conf_threshold", 0.95))
+        mask = conf >= conf_thr
 
         agree_mask = None
         if mode in ("independent_agree", "independent_joint", "independent_union",
-                   "independent_balanced") and f2_logits is not None:
+                    "independent_balanced", "independent_auto") and f2_logits is not None:
             f2_pred = f2_logits.detach().argmax(dim=1)
             agree_mask = f2_pred.eq(pred)
             stats["agree_rate"] = float(agree_mask.float().mean().item())
@@ -100,14 +149,14 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
 
         proto_mask = None
         if mode in ("independent_proto", "independent_joint", "independent_union",
-                   "independent_balanced") and student_proj is not None:
+                    "independent_balanced", "independent_auto") and student_proj is not None:
             support = _prototype_support(student_proj.detach(), pred,
                                          source_prototype_state)
             if support is not None:
                 margin, own_valid = support
                 proto_mask = (margin > 0) & own_valid
                 stats["proto_rate"] = float(proto_mask.float().mean().item())
-                if mode != "independent_union":
+                if mode not in ("independent_union", "independent_balanced", "independent_auto"):
                     mask = mask & proto_mask
 
         if mode == "independent_union":
@@ -120,15 +169,17 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
             if support is not None:
                 mask = mask & support
 
-        # balanced fill: keep the agreement-based selection as the backbone and
-        # only top up classes that are under-represented, preferring samples
-        # that the source prototypes support (never removes majority samples).
-        if mode == "independent_balanced":
+        # ---- balanced / auto fill -----------------------------------------
+        do_fill = mode == "independent_balanced"
+        cap_override = int(getattr(args, "rgs_class_cap", 0))
+        if mode == "independent_auto":
+            tag = _auto_tag(args, pred, num_classes, stats)
+            do_fill = tag in ("fill2", "cap4")
+            if tag == "cap4" and cap_override <= 0:
+                cap_override = 4
+
+        if do_fill:
             base = mask.clone()
-            if proto_mask is not None:
-                fill_pool = mask | (conf.new_zeros(mask.shape, dtype=torch.bool))
-            else:
-                fill_pool = mask
             min_per_class = int(getattr(args, "rgs_min_per_class", 2))
             if min_per_class > 0:
                 for c in range(int(num_classes)):
@@ -137,13 +188,11 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
                     if have >= min_per_class:
                         continue
                     need = min_per_class - have
-                    candidates = ((pred == c) & (conf >= float(getattr(args, "rgs_conf_threshold", 0.95)))
-                                  & (~base))
+                    candidates = ((pred == c) & (conf >= conf_thr) & (~base))
                     if proto_mask is not None:
                         candidates = candidates & proto_mask
                     if int(candidates.sum().item()) == 0 and proto_mask is not None:
-                        candidates = ((pred == c) & (conf >= float(getattr(args, "rgs_conf_threshold", 0.95)))
-                                      & (~base))
+                        candidates = ((pred == c) & (conf >= conf_thr) & (~base))
                     if int(candidates.sum().item()) == 0:
                         continue
                     idx_c = candidates.nonzero(as_tuple=True)[0]
@@ -164,7 +213,7 @@ def select_rgs_samples(teacher_pred=None, teacher_conf=None,
         conf_sel = conf[idx]
 
         # optional per-class cap (ablation only; disabled by default)
-        cap = int(getattr(args, "rgs_class_cap", 0))
+        cap = int(cap_override)
         if cap > 0:
             keep = torch.zeros_like(conf_sel, dtype=torch.bool)
             for c in labels.unique().tolist():

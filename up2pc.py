@@ -358,7 +358,8 @@ def build_parser():
     ours_group.add_argument('--rgs_selector', default='legacy',
                             choices=['legacy', 'independent_conf', 'independent_agree',
                                      'independent_proto', 'independent_joint', 'independent_union',
-                                     'independent_balanced'],
+                                     'independent_balanced',
+                                     'independent_auto'],
                             help='independent target-domain CE selection for RGS')
     ours_group.add_argument('--rgs_conf_threshold', default=0.95, type=float)
     ours_group.add_argument('--rgs_weight_mode', default='teacher_conf',
@@ -1330,7 +1331,7 @@ def train_epoch(ep, train_loader, train_tar_loader, G, F1, F2, F1_teacher,
                           f"selected={_rgs_stats['selected']} conf={_rgs_stats['conf_mean']:.3f} "
                           f"agree={_rgs_stats['agree_rate']:.3f} proto={_rgs_stats['proto_rate']:.3f} "
                           f"ce={float(_rgs_loss):.4f} w={reliab_ce_weight:.4f} "
-                          f"per_class={_rgs_stats['per_class']}")
+                          f"per_class={_rgs_stats['per_class']}" + (f" auto={_rgs_stats['auto_tag']} gini={_rgs_stats['auto_gini']} fz={_rgs_stats['auto_frac_zero']}" if 'auto_tag' in _rgs_stats else ''))
             elif ep % 10 == 0:
                 print(f"[rgs_{_rgs_stats['mode']}] ep={ep} empty selection, RGS skipped")
 
