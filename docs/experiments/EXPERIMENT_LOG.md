@@ -1,60 +1,150 @@
 # 实验记录（每次修改后必须追加）
 
-> 规则：每次修改代码后，记录「修改内容 → 运行配置 → 三数据集 3-seed 结果（OA mean±std，逐 seed）→ 结论」。
-> 基线（纯 TAPDA，3 seed）：Houston 78.93、HyRANK 48.80、Pavia 91.14、YRD 94.56。
-> 当前方法（SSTI+RATC，3 seed）：Houston 80.23、HyRANK 49.23、Pavia 92.15、YRD 92.44。
+> **记录位置（三处同步）**
+> 1. 本地仓库：`D:\桌面\退路代码\RMDANet_v7.1\docs\experiments\EXPERIMENT_LOG.md`
+> 2. GitHub：仓库 `Azures007/RMDANet`，分支 `rgs2sv`（及 `rgs2`）下的 `docs/experiments/EXPERIMENT_LOG.md`
+> 3. 服务器：`~/autodl-tmp/tapda_repro/docs/experiments/EXPERIMENT_LOG.md`（`git reset --hard` 到 `rgs2sv` 后即存在）
+>
+> 每次实验的原始日志：`/root/autodl-tmp/experiments/<时间戳>_<配置名>/`
+> - `logs/*.log`（完整训练日志）
+> - `R_*.md`（OA/AA/Kappa/逐类/配对比较）
+> - `RESULTS.md`（汇总）
+
+## 记录规则
+
+每次修改后必须记录：**配置 → OA（逐 seed、mean±std）→ AA（mean±std）→ Kappa（mean±std）→ 每个类别准确率 → 对比 SSTI+RATC → 结论**。
+
+## 基线（纯 TAPDA，3 seed）
+
+| 数据集 | OA（逐 seed） | OA mean±std | AA | Kappa |
+|---|---|---|---|---|
+| Houston | 80.83 / 78.96 / 77.01 | 78.93 ± 1.91 | 77.18 ± 1.11 | 67.43 ± 2.14 |
+| HyRANK | 49.25 / 49.83 / 47.33 | 48.80 ± 1.31 | 59.01 ± 0.96 | 42.01 ± 1.01 |
+| Pavia | 89.22 / 92.93 / 91.27 | 91.14 ± 1.86 | 91.97 ± 0.38 | 89.41 ± 1.77 |
+| YRD | 95.41 / 94.77 / 93.50 | 94.56 ± 0.97 | 76.34 ± 1.73 | 91.58 ± 1.22 |
+
+**当前方法 SSTI+RATC（3 seed）**：Houston 80.23、HyRANK 49.23、Pavia 92.15、YRD 92.44。
 
 ## 汇总表
 
-| # | 日期 | 修改/配置 | 运行配置 | Houston | HyRANK | Pavia | 结论 |
-|---|---|---|---|---|---|---|---|
-| 1 | 2026-11-09 | RGS v2 `independent_joint` | `--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_joint` | **81.31 ± 1.39** | 48.71 ± 1.39 | 91.63 ± 0.36 | vs SSTI+RATC：+1.08 / −0.52 / −0.52 |
-| 2 | 2026-11-09 | RGS v2 `independent_agree` | `--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_agree` | 79.94 ± 0.62 | 48.93 ± 0.59 | **93.13 ± 1.30** | vs SSTI+RATC：−0.29 / −0.30 / **+0.98（3/3 正）** |
-| 3 | 2026-11-09 | `agree + SV-TTA`（rgs2sv） | 同上 + `--svtta` | 79.94 ± 0.62 | 48.93 ± 0.59 | 93.13 ± 1.30 | SV-TTA 未触发，与 #2 完全一致 |
-| 4 | 2026-11-09 | `agree + rgs_class_cap 4`（HyRANK） | 同上 + `--rgs_class_cap 4` | — | **50.54 ± 1.42** | — | vs SSTI+RATC **+1.31**，vs 无 cap **+1.61** ✅ |
-| 5 | 2026-11-09 | `agree + rgs_class_cap 4`（Houston/Pavia） | 同上 + `--rgs_class_cap 4` | **77.87 ± 3.06**（74.95/77.60/81.05） | 50.54（同 #4） | 92.14 ± 1.89（90.30/94.07/92.04） | Houston **−2.36**（class0 崩到 8.45%）；Pavia ≈持平（−0.01） |
+| # | 日期 | 修改/配置 | Houston OA | HyRANK OA | Pavia OA | 结论 |
+|---|---|---|---|---|---|---|
+| 1 | 2026-11-09 | RGS `independent_joint` | **81.31 ± 1.39** | 48.71 ± 1.39 | 91.63 ± 0.36 | vs SSTI+RATC：+1.08 / −0.52 / −0.52 |
+| 2 | 2026-11-09 | RGS `independent_agree` | 79.94 ± 0.62 | 48.93 ± 0.59 | **93.13 ± 1.30** | vs SSTI+RATC：−0.29 / −0.30 / **+0.98** |
+| 3 | 2026-11-09 | `agree + SV-TTA` | 79.94 ± 0.62 | 48.93 ± 0.59 | 93.13 ± 1.30 | SV-TTA 未触发，与 #2 相同 |
+| 4 | 2026-11-09 | `agree + rgs_class_cap 4`（仅 HyRANK） | — | **50.54 ± 1.42** | — | vs SSTI+RATC **+1.31** |
+| 5 | 2026-11-09 | `agree + rgs_class_cap 4`（Houston/Pavia） | **77.87 ± 3.06** | 50.54（同 #4） | 92.14 ± 1.89 | Houston **−2.36**（class0 崩）；Pavia ≈持平 |
+
+---
 
 ## 详细记录
 
-### 2026-11-09 修改 1：RGS 独立选样分支（independent_joint）
-- 改动文件：`modules/rgs_selector.py`（新增）、三个入口（参数+接入）、`tests/test_rgs_selector.py`、`tools/rgs_v2_run.sh`
+### 2026-11-09 修改 1：RGS 独立选样分支（`independent_joint`）
+
+- 改动文件：`modules/rgs_selector.py`（新增）、`houston13218.py`/`up2pc.py`/`nc122nc13.py`（参数+接入）、`tests/test_rgs_selector.py`、`tools/rgs_v2_run.sh`
 - 运行配置：`--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_joint`
-- 结果（3 seed，实验目录 `/root/autodl-tmp/experiments/20261108-234348_rgs_independent_joint`）：
-  - Houston：82.59 / 79.83 / 81.51 → 81.31 ± 1.39（AA 77.87，Kappa 70.08），配对差 +2.38，3/3 正
-  - HyRANK：47.27 / 48.81 / 50.05 → 48.71 ± 1.39（AA 58.61，Kappa 41.53），配对差 −0.09
-  - Pavia：91.34 / 91.52 / 92.04 → 91.63 ± 0.36（AA 92.82，Kappa 89.99），配对差 +0.49
-- 对比 SSTI+RATC（80.23 / 49.23 / 92.15）：Houston **+1.08**，HyRANK **−0.52**，Pavia **−0.52**
-- 结论：新 RGS 对 Houston 有显著收益；HyRANK/Pavia 相对 SSTI+RATC 掉点。
+- 实验目录：`/root/autodl-tmp/experiments/20261108-234348_rgs_independent_joint`
+
+**Houston**
+- OA：82.59 / 79.83 / 81.51 → **81.31 ± 1.39**（配对差 +2.38，3/3 正）
+- AA：77.87 ± 0.97；Kappa：70.08 ± 1.14
+- 逐类：`[0] 75.59 | [1] 75.89 | [2] 65.38 | [3] 86.36 | [4] 83.97 | [5] 84.91 | [6] 73.01`
+
+**HyRANK**
+- OA：47.27 / 48.81 / 50.05 → **48.71 ± 1.39**（配对差 −0.09）
+- AA：58.61 ± 1.54；Kappa：41.53 ± 1.46
+- 逐类：`[0] 53.70 | [1] 100.00 | [2] 83.09 | [3] 72.15 | [4] 65.29 | [5] 41.87 | [6] 34.88 | [7] 29.78 | [8] 21.78 | [9] 0.82 | [10] 100.00 | [11] 100.00`
+
+**Pavia**
+- OA：91.34 / 91.52 / 92.04 → **91.63 ± 0.36**（配对差 +0.49）
+- AA：92.82 ± 0.62；Kappa：89.99 ± 0.35
+- 逐类：`[0] 92.25 | [1] 97.50 | [2] 95.34 | [3] 83.41 | [4] 99.73 | [5] 97.51 | [6] 84.01`
+
+- 对比 SSTI+RATC（80.23 / 49.23 / 92.15）：+1.08 / −0.52 / −0.52
+- 结论：对 Houston 显著有效；HyRANK/Pavia 相对 SSTI+RATC 掉点。
 
 ### 2026-11-09 修改 2：RGS `independent_agree`（去掉原型条件）
-- 运行配置：`--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_agree`
-- 结果（3 seed，实验目录 `/root/autodl-tmp/experiments/20261109-004517_rgs_independent_agree`）：
-  - Houston：80.52 / 79.29 / 80.02 → 79.94 ± 0.62（AA 72.46，Kappa 67.99），配对差 +1.01
-  - HyRANK：48.54 / 49.61 / 48.65 → 48.93 ± 0.59（AA 60.27，Kappa 41.87），配对差 +0.13
-  - Pavia：91.66 / 93.59 / 94.14 → 93.13 ± 1.30（AA 93.40，Kappa 91.76），配对差 +1.99，3/3 正
-- 对比 SSTI+RATC：Houston −0.29，HyRANK −0.30，Pavia **+0.98**
-- 结论：不带原型的独立选样在 Pavia 上最好（+0.98）；Houston 的 class0 在无原型约束时崩到 35.99%。
 
-### 2026-11-09 修改 3：agree + SV-TTA（rgs2sv 分支）
+- 运行配置：`--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_agree`
+- 实验目录：`/root/autodl-tmp/experiments/20261109-004517_rgs_independent_agree`
+
+**Houston**
+- OA：80.52 / 79.29 / 80.02 → **79.94 ± 0.62**（配对差 +1.01）
+- AA：72.46 ± 1.56；Kappa：67.99 ± 0.78
+- 逐类：`[0] 35.99 | [1] 76.65 | [2] 60.86 | [3] 92.42 | [4] 76.35 | [5] 84.35 | [6] 80.61`
+
+**HyRANK**
+- OA：48.54 / 49.61 / 48.65 → **48.93 ± 0.59**（配对差 +0.13）
+- AA：60.27 ± 2.19；Kappa：41.87 ± 0.41
+- 逐类：`[0] 71.18 | [1] 100.00 | [2] 88.31 | [3] 70.04 | [4] 63.43 | [5] 41.33 | [6] 34.42 | [7] 29.25 | [8] 24.42 | [9] 0.82 | [10] 100.00 | [11] 100.00`
+
+**Pavia**
+- OA：91.66 / 93.59 / 94.14 → **93.13 ± 1.30**（配对差 +1.99，3/3 正）
+- AA：93.40 ± 1.52；Kappa：91.76 ± 1.27
+- 逐类：`[0] 93.14 | [1] 98.88 | [2] 87.72 | [3] 84.12 | [4] 99.88 | [5] 98.06 | [6] 91.96`
+
+- 对比 SSTI+RATC：−0.29 / −0.30 / **+0.98**
+- 结论：Pavia 最好；Houston 无原型约束时 class0 崩到 35.99%。
+
+### 2026-11-09 修改 3：`agree + SV-TTA`（rgs2sv 分支）
+
 - 修复过程：rgs2 分支缺 `modules/svtta.py` → 补文件（UTF-8 无 BOM）；SV-TTA 按 cns 风格接入 RATC 的 TENT 分支。
-- 结果（`/root/autodl-tmp/experiments/*_rgs_agree_svtta_v3`）：与 #2 完全一致（79.94 / 48.93 / 93.13）
-- 结论：SV-TTA 在这三个数据集上未触发拒绝（TENT 分支未被拒绝），对结果无影响。
+- 实验目录：`/root/autodl-tmp/experiments/*_rgs_agree_svtta_v3`
+- **结果与 #2 完全一致**：
+
+| 数据集 | OA | AA | Kappa | 逐类 |
+|---|---|---|---|---|
+| Houston | 79.94 ± 0.62（80.52/79.29/80.02） | 72.46 ± 1.56 | 67.99 ± 0.78 | [0]35.99 [1]76.65 [2]60.86 [3]92.42 [4]76.35 [5]84.35 [6]80.61 |
+| HyRANK | 48.93 ± 0.59（48.54/49.61/48.65） | 60.27 ± 2.19 | 41.87 ± 0.41 | [0]71.18 [1]100 [2]88.31 [3]70.04 [4]63.43 [5]41.33 [6]34.42 [7]29.25 [8]24.42 [9]0.82 [10]100 [11]100 |
+| Pavia | 93.13 ± 1.30（91.66/93.59/94.14） | 93.40 ± 1.52 | 91.76 ± 1.27 | [0]93.14 [1]98.88 [2]87.72 [3]84.12 [4]99.88 [5]98.06 [6]91.96 |
+
+- 结论：SV-TTA 在这三个数据集上未触发拒绝，对结果无影响。
 
 ### 2026-11-09 修改 4：HyRANK + `--rgs_class_cap 4`
-- 运行配置：`--ssti --ratc --svtta --reliab_ce_weight 0.05 --rgs_selector independent_agree --rgs_class_cap 4`
-- 结果：HyRANK 50.07 / 49.49 / 52.06 → **50.54 ± 1.42**
-- 对比 SSTI+RATC（49.23）：**+1.31**；对比 agree 无 cap（48.93）：**+1.61**
-- 结论：类上限有效，验证了"独立选样缺类平衡导致 HyRANK 掉点"的假设。
 
-### 选样统计（来自 joint 日志）
-- HyRANK：每 batch 32 样本，选 8–21 个（约 25%–65%），proto 通过率 0.50–0.88；
-- Pavia：每 batch 32 样本，选 19–30 个（约 60%–94%），proto 通过率 0.75–0.97。
+- 运行配置：`--ssti --ratc --svtta --reliab_ce_weight 0.05 --rgs_selector independent_agree --rgs_class_cap 4`
+- 实验目录：`/root/autodl-tmp/experiments/*_rgs_agree_svtta_v3`（`logs/HyRANK_cap4.log`）
+
+| 数据集 | OA（逐 seed） | OA mean±std | AA | Kappa | 逐类 |
+|---|---|---|---|---|---|
+| HyRANK | 50.07 / 49.49 / 52.06 | **50.54 ± 1.42** | **待补** | **待补** | **待补** |
+
+- 补录命令（服务器上执行，把 AA/Kappa/逐类补进本表）：
+  ```bash
+  DIR=$(ls -dt /root/autodl-tmp/experiments/*_rgs_agree_svtta_v3 | head -1)
+  grep -E "average AA|average kappa|accuracy for each class|^Class " $DIR/logs/HyRANK_cap4.log
+  # 或
+  python /root/autodl-tmp/summarize_runs.py $DIR/logs/HyRANK_cap4.log --out $DIR/R_HyRANK_cap4.md
+  cat $DIR/R_HyRANK_cap4.md
+  ```
+- 对比 SSTI+RATC（49.23）：**+1.31**；对比 agree 无 cap（48.93）：**+1.61**
+- 结论：类上限有效，验证"独立选样缺类平衡导致 HyRANK 掉点"的假设。
+
+### 2026-11-09 修改 5：`agree + rgs_class_cap 4`（Houston / Pavia）
+
+- 运行配置：`--ssti --ratc --reliab_ce_weight 0.05 --rgs_selector independent_agree --rgs_class_cap 4`
+- 实验目录：`/root/autodl-tmp/experiments/*_rgs_agree_cap4`
+
+**Houston**
+- OA：74.95 / 77.60 / 81.05 → **77.87 ± 3.06**（配对差 −1.07）
+- AA：71.58 ± 1.22；Kappa：66.07 ± 2.96
+- 逐类：`[0] 8.45 | [1] 89.70 | [2] 61.93 | [3] 93.94 | [4] 84.45 | [5] 77.90 | [6] 84.72`
+
+**Pavia**
+- OA：90.30 / 94.07 / 92.04 → **92.14 ± 1.89**（配对差 +1.00，3/3 正）
+- AA：93.23 ± 1.37；Kappa：90.59 ± 1.83
+- 逐类：`[0] 91.13 | [1] 98.77 | [2] 96.06 | [3] 83.18 | [4] 99.73 | [5] 97.03 | [6] 86.71`
+
+- 对比 SSTI+RATC：Houston **−2.36**（class0 崩到 8.45%）；Pavia ≈持平（−0.01）
+- 结论：类上限对 Houston 有害，不适合作为统一配置。
+
+---
 
 ## 待测配置（下一步）
 
 | 配置 | 目的 |
 |---|---|
-| `independent_union`（conf & (agree \| proto)）三个数据集 3 seed | 不用硬类上限，靠"一致性或原型"来兼顾 Houston 的 class0 与 HyRANK/Pavia 的覆盖率 |
+| `independent_union`（conf & (agree \| proto)）三数据集 3 seed | 不用硬类上限，兼顾 Houston 的 class0 与 HyRANK/Pavia 覆盖率 |
 | `joint + class_cap 4` | 对照 |
 | class_cap 取 2 / 8 | 敏感性 |
 
@@ -71,10 +161,10 @@
 ### YYYY-MM-DD 修改 N：<简述>
 - 改动文件：
 - 运行配置：
-- 结果：
-  - Houston：xx.xx / xx.xx / xx.xx → mean ± std
-  - HyRANK：...
-  - Pavia：...
+- 实验目录：
+- Houston：OA seeds → mean±std；AA ± std；Kappa ± std；逐类 [...]
+- HyRANK：OA seeds → mean±std；AA ± std；Kappa ± std；逐类 [...]
+- Pavia：OA seeds → mean±std；AA ± std；Kappa ± std；逐类 [...]
 - 对比 SSTI+RATC（80.23 / 49.23 / 92.15）：
 - 结论：
 ```
