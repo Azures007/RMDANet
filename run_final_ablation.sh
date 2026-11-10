@@ -9,8 +9,8 @@ export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
-# final DRSE configuration (residual center-guided pooling)
-export DRSE_TUNE=1 DRSE_RESIDUAL=1 DRSE_CENTER_SIZE=5 DRSE_TEMP=0.30 DRSE_INIT=0.6,0.3,0.1
+# DRSE residual center-guided pooling is baked into core/model.py and configured
+# per dataset in datasets/*/config.yaml (pool_center_size/pool_temperature/...).
 
 PAVIA_DATA=/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets/Pavia
 HOUSTON_DATA=/root/autodl-tmp/Datasets/Houston

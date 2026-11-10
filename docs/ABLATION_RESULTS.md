@@ -9,11 +9,26 @@ seed = 1237、data_seed = 1237、单卡 RTX 4090、torch 2.8.0+cu128。
 | 模块 | 实现 | 消融方式 |
 |---|---|---|
 | RFTM | `core/prat.py` PRAT（相位可靠性残差低频振幅迁移） | `--abl-prat 1/0` |
-| DRSE | 残差式中心引导池化：`pooled = gap + α·(guided − gap)`，α = sigmoid(learnable logit)，初始 0.018；center_size=5，attention_temperature=0.30，gate 初始 [0.6, 0.3, 0.1]；光谱融合关闭 | `--abl-pool guided/gap` |
+| DRSE | `core/model.py::CenterGuidedPooling` 残差式中心引导池化（**公式已合入源码**） | `--abl-pool guided/gap` |
 | RTML | 跨 epoch 统一可靠性记忆（history 伪标签 + guard/原型/空间可靠性/CEMPA） | `--abl-rtml 1/0` |
 
+DRSE 的残差公式在 `core/model.py` 中直接实现（不是运行时补丁）：
+
+```python
+# CenterGuidedPooling.__init__
+self._alpha_logit = nn.Parameter(torch.tensor(alpha_logit)) if self.residual else None
+# CenterGuidedPooling.forward
+if self.residual and self.mode == "guided":
+    alpha = torch.sigmoid(self._alpha_logit)
+    pooled = global_descriptor + alpha * (pooled - global_descriptor)
+```
+
+参数由 `datasets/*/config.yaml` 的 `uda` 段给出：`pool_center_size=5`、
+`pool_temperature=0.30`、`pool_gate_init="0.6,0.3,0.1"`、`pool_residual=true`，
+`pool_alpha_logit` = −4.0（Houston/Pavia，α_init=0.018）/ −3.5（HyRANK，α_init=0.029）。
+
 > DRSE 原实现为 `CenterGuidedPooling(center_size=3, temp=0.12, 初始权重[0.38,0.47,0.15])`，
-> 在 Houston 上单独加为 −3.61。改为"残差式 + 更软引导"后转正（Houston +0.44、Pavia +0.63）。
+> 在 Houston 上单独加为 −3.61。改为"残差式 + 更软引导"后转正（Houston +0.44、Pavia +0.63、HyRANK +0.78）。
 
 ## Houston13 → Houston18（4 行，单调递增）
 

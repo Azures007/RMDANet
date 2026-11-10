@@ -157,6 +157,9 @@ class CenterGuidedPooling(nn.Module):
         center_size: int = 3,
         attention_temperature: float = 0.12,
         mode: str = "guided",
+        gate_init: tuple[float, float, float] = (0.38, 0.47, 0.15),
+        residual: bool = False,
+        alpha_logit: float = 0.0,
     ) -> None:
         super().__init__()
         if mode not in {"gap", "center", "guided"}:
@@ -165,6 +168,7 @@ class CenterGuidedPooling(nn.Module):
         self.channels = int(channels)
         self.center_size = int(center_size)
         self.temperature = max(float(attention_temperature), 1e-4)
+        self.residual = bool(residual)
         hidden = max(32, channels // 3)
         self.gate = nn.Sequential(
             nn.Linear(channels * 4, hidden),
@@ -172,10 +176,14 @@ class CenterGuidedPooling(nn.Module):
             nn.Linear(hidden, 3),
         )
         nn.init.zeros_(self.gate[-1].weight)
-        initial = torch.tensor([0.38, 0.47, 0.15], dtype=torch.float32)
+        initial = torch.tensor(gate_init, dtype=torch.float32)
         nn.init.constant_(self.gate[-1].bias, 0.0)
         with torch.no_grad():
             self.gate[-1].bias.copy_(initial.log())
+        # Residual center guidance: pooled = gap + alpha * (guided - gap),
+        # alpha = sigmoid(learnable logit), initialised near zero so the module
+        # starts from the stable GAP baseline and only deviates when helpful.
+        self._alpha_logit = nn.Parameter(torch.tensor(float(alpha_logit))) if self.residual else None
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         batch, channels, height, width = x.shape
@@ -211,6 +219,9 @@ class CenterGuidedPooling(nn.Module):
             + weights[:, 1:2] * center_descriptor
             + weights[:, 2:3] * attended_descriptor
         )
+        if self.residual and self.mode == "guided":
+            alpha = torch.sigmoid(self._alpha_logit)
+            pooled = global_descriptor + alpha * (pooled - global_descriptor)
         attention_map = attention.view(batch, height, width)
         return pooled, weights, attention_map
 
@@ -291,16 +302,32 @@ class SpectralReliabilityFusion(nn.Module):
         rescue_strength: float = 0.55,
         rescue_confidence: float = 0.55,
         mode: str = "reliable",
+        fusion_alpha: float = 1.0,
+        fusion_delta: float = -0.2,
+        fusion_tau_a: float = 0.20,
+        fusion_t_a: float = 0.10,
+        fusion_t_w: float = 0.15,
+        fusion_w_min: float = 0.10,
+        fusion_w_max: float = 0.90,
     ) -> None:
         super().__init__()
-        if mode not in {"off", "average", "reliable"}:
-            raise ValueError("Spectral fusion mode must be off, average or reliable.")
+        if mode not in {"off", "average", "reliable", "bidirectional"}:
+            raise ValueError(
+                "Spectral fusion mode must be off, average, reliable or bidirectional."
+            )
         self.mode = mode
         self.max_gate = float(max_gate)
         self.agreement_threshold = float(agreement_threshold)
         self.agreement_temperature = max(float(agreement_temperature), 1e-4)
         self.rescue_strength = float(max(0.0, min(1.0, rescue_strength)))
         self.rescue_confidence = float(max(0.0, min(1.0, rescue_confidence)))
+        self.fusion_alpha = float(fusion_alpha)
+        self.fusion_delta = float(fusion_delta)
+        self.fusion_tau_a = float(fusion_tau_a)
+        self.fusion_t_a = max(float(fusion_t_a), 1e-4)
+        self.fusion_t_w = max(float(fusion_t_w), 1e-4)
+        self.fusion_w_min = float(fusion_w_min)
+        self.fusion_w_max = float(fusion_w_max)
         hidden = max(32, feature_dim // 2)
         self.gate = nn.Sequential(
             nn.Linear(feature_dim * 3, hidden),
@@ -310,6 +337,38 @@ class SpectralReliabilityFusion(nn.Module):
         nn.init.zeros_(self.gate[-1].weight)
         init_gate = 0.12 / self.max_gate
         nn.init.constant_(self.gate[-1].bias, math.log(init_gate / (1.0 - init_gate)))
+
+    @staticmethod
+    def _branch_reliability(probability: torch.Tensor) -> torch.Tensor:
+        """Top-1 minus top-2 margin of a branch's softmax, in [0, 1]."""
+        top2 = torch.topk(probability, k=2, dim=1).values
+        return (top2[:, 0] - top2[:, 1]).clamp(0.0, 1.0)
+
+    def _bidirectional_forward(
+        self,
+        context_features: torch.Tensor,
+        spectral_features: torch.Tensor,
+        context_logits: torch.Tensor,
+        spectral_logits: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        context_probability = F.softmax(context_logits.detach().float(), dim=1)
+        spectral_probability = F.softmax(spectral_logits.detach().float(), dim=1)
+        r_c = self._branch_reliability(context_probability)
+        r_s = self._branch_reliability(spectral_probability)
+
+        cosine = torch.sum(
+            F.normalize(context_features, dim=1) * F.normalize(spectral_features, dim=1), dim=1
+        )
+        agreement = torch.sigmoid((cosine - self.fusion_tau_a) / self.fusion_t_a)
+
+        base = torch.sigmoid(
+            self.fusion_alpha * (r_s - r_c) / self.fusion_t_w + self.fusion_delta
+        )
+        w_s = (0.5 + agreement * (base - 0.5)).clamp(self.fusion_w_min, self.fusion_w_max)
+
+        weight = w_s[:, None].expand_as(context_features)
+        fused = F.normalize((1.0 - weight) * context_features + weight * spectral_features, dim=1)
+        return fused, weight, w_s
 
     def forward(
         self,
@@ -326,6 +385,10 @@ class SpectralReliabilityFusion(nn.Module):
             reliability = context_features.new_ones(context_features.size(0))
             gate = context_features.new_full(context_features.shape, 0.5)
             return fused, gate, reliability
+        if self.mode == "bidirectional":
+            return self._bidirectional_forward(
+                context_features, spectral_features, context_logits, spectral_logits
+            )
 
         difference = (context_features - spectral_features).abs()
         raw_gate = self.max_gate * torch.sigmoid(
@@ -384,6 +447,18 @@ class DualReliabilityEncoder(nn.Module):
         spectral_fusion_mode: str = "reliable",
         amplitude_channel: bool = False,
         enable_dual_head: bool = False,
+        pool_center_size: int = 3,
+        pool_temperature: float = 0.12,
+        pool_gate_init: tuple[float, float, float] = (0.38, 0.47, 0.15),
+        pool_residual: bool = False,
+        pool_alpha_logit: float = 0.0,
+        fusion_alpha: float = 1.0,
+        fusion_delta: float = -0.2,
+        fusion_tau_a: float = 0.20,
+        fusion_t_a: float = 0.10,
+        fusion_t_w: float = 0.15,
+        fusion_w_min: float = 0.10,
+        fusion_w_max: float = 0.90,
     ) -> None:
         super().__init__()
         self.enable_dual_head = bool(enable_dual_head)
@@ -393,6 +468,7 @@ class DualReliabilityEncoder(nn.Module):
         self.aspp_mode = aspp_mode
         self.pooling_mode = pooling_mode
         self.spectral_fusion_mode = spectral_fusion_mode
+        self.pool_gate_init = tuple(gate_init_value for gate_init_value in pool_gate_init)
         self.local3d = LocalSpectralSpatialEncoder()
         self.semantic2d = nn.Sequential(
             ResidualBlock2D(64, 96, dropout=0.06),
@@ -401,7 +477,13 @@ class DualReliabilityEncoder(nn.Module):
         )
         self.micro_aspp = ScaleSelectiveMicroASPP(128, 32, mode=aspp_mode)
         self.pool = CenterGuidedPooling(
-            128, center_size=3, attention_temperature=0.12, mode=pooling_mode
+            128,
+            center_size=pool_center_size,
+            attention_temperature=pool_temperature,
+            mode=pooling_mode,
+            gate_init=pool_gate_init,
+            residual=pool_residual,
+            alpha_logit=pool_alpha_logit,
         )
         if projection_norm == "batch":
             norm: nn.Module = nn.BatchNorm1d(256)
@@ -424,7 +506,15 @@ class DualReliabilityEncoder(nn.Module):
         self.classifier2 = (CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
                             if self.enable_dual_head else None)
         self.spectral_fusion = SpectralReliabilityFusion(
-            self.projection_dim, mode=spectral_fusion_mode
+            self.projection_dim,
+            mode=spectral_fusion_mode,
+            fusion_alpha=fusion_alpha,
+            fusion_delta=fusion_delta,
+            fusion_tau_a=fusion_tau_a,
+            fusion_t_a=fusion_t_a,
+            fusion_t_w=fusion_t_w,
+            fusion_w_min=fusion_w_min,
+            fusion_w_max=fusion_w_max,
         )
         self.reset_parameters()
         self._restore_safe_initialization()
@@ -440,7 +530,7 @@ class DualReliabilityEncoder(nn.Module):
         nn.init.zeros_(self.micro_aspp.selector[-1].weight)
         nn.init.zeros_(self.micro_aspp.selector[-1].bias)
         nn.init.zeros_(self.pool.gate[-1].weight)
-        initial = torch.tensor([0.38, 0.47, 0.15], dtype=self.pool.gate[-1].bias.dtype)
+        initial = torch.tensor(self.pool_gate_init, dtype=self.pool.gate[-1].bias.dtype)
         with torch.no_grad():
             self.pool.gate[-1].bias.copy_(initial.log())
         nn.init.zeros_(self.spectral_fusion.gate[-1].weight)

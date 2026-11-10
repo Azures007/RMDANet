@@ -31,6 +31,13 @@ training:
   amp: true
 
 uda:
+  # DRSE: residual center-guided pooling (baked into core/model.py)
+  pool_center_size: 5
+  pool_temperature: 0.30
+  pool_gate_init: "0.6,0.3,0.1"
+  pool_residual: true
+  pool_alpha_logit: -3.5
+
   ablation_id: full
   align_maturity_gate: false
   independent_target_reweight: false

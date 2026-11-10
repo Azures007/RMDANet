@@ -108,6 +108,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval_batch_size", type=int, default=192)
     parser.add_argument("--projection_dim", type=int, default=128)
     parser.add_argument("--projection_norm", choices=["layer", "batch"], default="batch")
+    # --- DRSE: residual center-guided pooling (baked into core/model.py) ---
+    parser.add_argument("--pool_center_size", type=int, default=5)
+    parser.add_argument("--pool_temperature", type=float, default=0.30)
+    parser.add_argument("--pool_gate_init", type=str, default="0.6,0.3,0.1",
+                        help="initial softmax weights: global,center,attended")
+    parser.add_argument("--pool_residual", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--pool_alpha_logit", type=float, default=-4.0,
+                        help="initial logit of the residual scale alpha (sigmoid(-4)=0.018)")
+    # --- bidirectional spectral reliability fusion (mode='bidirectional') ---
+    parser.add_argument("--fusion_alpha", type=float, default=1.0)
+    parser.add_argument("--fusion_delta", type=float, default=-0.2)
+    parser.add_argument("--fusion_tau_a", type=float, default=0.20)
+    parser.add_argument("--fusion_t_a", type=float, default=0.10)
+    parser.add_argument("--fusion_t_w", type=float, default=0.15)
+    parser.add_argument("--fusion_w_min", type=float, default=0.10)
+    parser.add_argument("--fusion_w_max", type=float, default=0.90)
     parser.add_argument("--use_gt_target_mask", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--target_gt_mix_ratio", type=float, default=0.0)
     parser.add_argument("--lambda_cca", type=float, default=0.0)
@@ -1515,6 +1531,18 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         spectral_fusion_mode=args.spectral_fusion_mode,
         amplitude_channel=args.amplitude_channel,
         enable_dual_head=(args.dual_head_filter or args.lambda_dual_source > 0),
+        pool_center_size=args.pool_center_size,
+        pool_temperature=args.pool_temperature,
+        pool_gate_init=tuple(float(v) for v in str(args.pool_gate_init).split(",")),
+        pool_residual=args.pool_residual,
+        pool_alpha_logit=args.pool_alpha_logit,
+        fusion_alpha=args.fusion_alpha,
+        fusion_delta=args.fusion_delta,
+        fusion_tau_a=args.fusion_tau_a,
+        fusion_t_a=args.fusion_t_a,
+        fusion_t_w=args.fusion_t_w,
+        fusion_w_min=args.fusion_w_min,
+        fusion_w_max=args.fusion_w_max,
     ).to(device)
     teacher = copy.deepcopy(student).to(device)
     teacher.eval()

@@ -12,26 +12,23 @@ Arbitrary combination (--tag NAME --prat 0/1 --pool guided/gap
                         --fusion reliable/off --rtml 0/1)
 """
 import argparse
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "core"))
-import model
-import drse_patch  # optional runtime tuning of CenterGuidedPooling (env-gated)
-
-drse_patch.patch(model)
 import trainer
 
 DATASET_DIR = {"pavia": "Pavia", "houston": "Houston", "hyrank": "HyRANK"}
 PAVIA_DATA = "/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets"
 
 ROWS = {
-    "base":      dict(prat=0, pool="gap",    fusion="off",      rtml=0),
-    "drse":      dict(prat=0, pool="guided", fusion="reliable", rtml=0),
-    "rftm":      dict(prat=1, pool="gap",    fusion="off",      rtml=0),
-    "drse_rftm": dict(prat=1, pool="guided", fusion="reliable", rtml=0),
-    "full":      dict(prat=1, pool="guided", fusion="reliable", rtml=1),
+    "base":      dict(prat=0, pool="gap",    fusion="off", rtml=0),
+    "drse":      dict(prat=0, pool="guided", fusion="off", rtml=0),
+    "rftm":      dict(prat=1, pool="gap",    fusion="off", rtml=0),
+    "drse_rftm": dict(prat=1, pool="guided", fusion="off", rtml=0),
+    "full":      dict(prat=1, pool="guided", fusion="off", rtml=1),
 }
 
 _orig_apply = trainer.apply_ablation_profile
@@ -49,8 +46,17 @@ def apply_ablate(args):
     else:
         args.pooling_mode = "gap"
 
-    if row["fusion"] == "reliable":
-        args.spectral_fusion_mode = "reliable"
+    # DRSE residual center-guided pooling (baked in core/model.py)
+    args.pool_center_size = 5
+    args.pool_temperature = 0.30
+    args.pool_gate_init = "0.6,0.3,0.1"
+    args.pool_residual = True
+    alpha_override = os.environ.get("DRSE_ALPHA_LOGIT")
+    if alpha_override is not None:
+        args.pool_alpha_logit = float(alpha_override)
+
+    if row["fusion"] in ("reliable", "bidirectional"):
+        args.spectral_fusion_mode = row["fusion"]
         args.use_spectral_aux = True
     else:
         args.spectral_fusion_mode = "off"
@@ -108,7 +114,7 @@ def main():
     p.add_argument("--tag", default=None, help="custom run name; requires explicit switches")
     p.add_argument("--abl-prat", type=int, choices=[0, 1])
     p.add_argument("--abl-pool", choices=["guided", "gap"])
-    p.add_argument("--abl-fusion", choices=["reliable", "off"])
+    p.add_argument("--abl-fusion", choices=["reliable", "off", "bidirectional"])
     p.add_argument("--abl-rtml", type=int, choices=[0, 1])
     p.add_argument("--abl-guard", type=int, choices=[0, 1])
     p.add_argument("--abl-spatial", type=int, choices=[0, 1])
