@@ -1,0 +1,53 @@
+# Salinas -> IndianPines
+# 16 类跨场景 UDA
+# Salinas 源域各类充足，IndianPines 目标域包含 4 个极小类
+dataset:
+  source_name: Salinas
+  target_name: IndianPines
+  num_classes: 16
+
+training:
+  patch_size: 7
+  batch_size: 64
+  eval_batch_size: 128
+  epochs: 250
+  lr: 0.001
+  weight_decay: 0.0004
+  grad_clip: 5.0
+  source_train_ratio: 0.1
+  source_samples_per_class: 200      # 每类固定 200 个源样本
+  target_train_max_samples: 15000    # 全场景有效像素 ~10249，会全部用
+  band_alignment_strength: 0.0
+  ema_decay: 0.994
+  label_smoothing: 0.035
+  num_workers: 8
+  amp: true
+
+uda:
+  ablation_id: full
+  pseudo_start_epoch: 100
+  pseudo_warm_epochs: 80
+  pseudo_confidence: 0.92
+  reliability_threshold: 0.55
+  cempa_start_epoch: 100
+  cempa_class_cap: 20
+  spatial_start_epoch: 150
+  target_gt_mix_ratio: 0.0
+  use_gt_target_mask: false
+  lambda_cca: 0.5
+  cca_start_epoch: 0
+  cca_temperature: 0.10
+  prat_style_max: 0.4
+  prat_warm_epochs: 80
+  strict_class_balance_strength: 1.0
+  balance_weight_flag: true
+  pseudo_balance_flag: true
+  prototype_align_flag: true
+  prototype_weight: 0.03
+  prototype_confidence: 0.95
+  prototype_temperature: 0.08
+  include_target_scale_mi: true
+  use_early_target_adaptation: true
+  memory_update_start_epoch: 1
+  cempa_min_age: 2
+  cempa_min_streak: 2
