@@ -69,6 +69,20 @@ def apply_ablate(args):
         args.reliability_weighted_prototype_update = True
         args.adaptive_anchor = True
         args.use_confusion_loss = True
+        # optional fine-grained overrides (rows created with --tag)
+        if row.get("guard") is not None:
+            args.use_guard = bool(row["guard"])
+        if row.get("spatial") is not None:
+            args.use_spatial_reliability = bool(row["spatial"])
+        if row.get("proto") is not None:
+            args.use_target_prototypes = bool(row["proto"])
+            args.use_prototype_veto = bool(row["proto"])
+            args.reliability_weighted_prototype_update = bool(row["proto"])
+        if row.get("confusion") is not None:
+            args.use_confusion_loss = bool(row["confusion"])
+        if row.get("history") is not None and not int(row["history"]):
+            args.pseudo_mode = "current"
+            args.use_probability_history = False
     else:
         args.pseudo_mode = "current"
         args.use_probability_history = False
@@ -96,6 +110,11 @@ def main():
     p.add_argument("--abl-pool", choices=["guided", "gap"])
     p.add_argument("--abl-fusion", choices=["reliable", "off"])
     p.add_argument("--abl-rtml", type=int, choices=[0, 1])
+    p.add_argument("--abl-guard", type=int, choices=[0, 1])
+    p.add_argument("--abl-spatial", type=int, choices=[0, 1])
+    p.add_argument("--abl-proto", type=int, choices=[0, 1])
+    p.add_argument("--abl-confusion", type=int, choices=[0, 1])
+    p.add_argument("--abl-history", type=int, choices=[0, 1])
     p.add_argument("--dataset", choices=sorted(DATASET_DIR), required=True)
     p.add_argument("--data-root", default="/root/autodl-tmp/Datasets")
     p.add_argument("--out-root", default=str(ROOT / "results_ablation_clean"))
@@ -106,7 +125,9 @@ def main():
                                   ("fusion", a.abl_fusion), ("rtml", a.abl_rtml)) if v is None]
         if missing:
             raise SystemExit(f"--tag requires explicit: {', '.join('--' + m for m in missing)}")
-        cfg = dict(prat=a.abl_prat, pool=a.abl_pool, fusion=a.abl_fusion, rtml=a.abl_rtml)
+        cfg = dict(prat=a.abl_prat, pool=a.abl_pool, fusion=a.abl_fusion, rtml=a.abl_rtml,
+                   guard=a.abl_guard, spatial=a.abl_spatial, proto=a.abl_proto,
+                   confusion=a.abl_confusion, history=a.abl_history)
         run_name = a.tag
     else:
         if not a.row:
