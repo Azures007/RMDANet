@@ -18,6 +18,7 @@ def main():
     p.add_argument("--source-per-class", type=int, default=180)
     p.add_argument("--lr", type=float, default=None)
     p.add_argument("--mmd-weight", type=float, default=1.0)
+    p.add_argument("--normalize-mode", default="l2", choices=["l2", "median"])
     p.add_argument("--out-root", default="results_benchmark")
     a = p.parse_args()
     common.train_baseline(

@@ -102,8 +102,9 @@ def _extract_patch(image: np.ndarray, r: int, c: int, size: int) -> np.ndarray:
     return patch.transpose(2, 0, 1)
 
 
-def build_arrays(args: argparse.Namespace, seed: int, source_per_class: int, target_pool: int):
-    norm_mode = "median" if getattr(args, "amplitude_channel", False) else "l2"
+def build_arrays(args: argparse.Namespace, seed: int, source_per_class: int, target_pool: int,
+                 normalize_mode: str = "l2"):
+    norm_mode = normalize_mode
     src = hsidata.load_source_scene(args.data_path, args.source_name, args.num_classes,
                                    normalize_mode=norm_mode)
     tgt = hsidata.load_target_image_only(args.data_path, args.target_name, normalize_mode=norm_mode)
@@ -156,6 +157,7 @@ def train_baseline(
     lr: float | None = None,
     source_per_class: int = 180,
     out_root: str = "results_benchmark",
+    normalize_mode: str = "l2",
     extra: dict | None = None,
 ) -> dict:
     args = protocol_args(dataset)
@@ -166,7 +168,8 @@ def train_baseline(
     base_trainer.set_seed(seed, True)
 
     src, aligned, sx, sy, tx = build_arrays(args, seed, source_per_class,
-                                            int(args.target_train_max_samples))
+                                            int(args.target_train_max_samples),
+                                            normalize_mode=normalize_mode)
     model = HSICNN(src.image.shape[-1], args.num_classes).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=args.weight_decay)
     total_steps = int(epochs * steps_per_epoch)
