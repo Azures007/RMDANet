@@ -39,6 +39,7 @@ class HSICNN(nn.Module):
 
     def __init__(self, bands: int, num_classes: int, feature_dim: int = 128, dropout: float = 0.1):
         super().__init__()
+        self.num_classes = int(num_classes)
         self.features = nn.Sequential(
             nn.Conv2d(bands, 64, 3, padding=1, bias=False),
             nn.BatchNorm2d(64),
@@ -183,7 +184,7 @@ def train_baseline(
         out_s = model(sx[si])
         out_t = model(tx[ti])
         loss = F.cross_entropy(out_s.logits, sy[si])
-        loss = loss + adapt(out_s, out_t, step / max(1, total_steps - 1))
+        loss = loss + adapt(out_s, out_t, step / max(1, total_steps - 1), ys=sy[si])
         loss.backward()
         if hasattr(adapt, "post_step"):
             adapt.post_step()
@@ -217,11 +218,13 @@ def train_baseline(
 # method adapters
 # --------------------------------------------------------------------------- #
 class _Zero(nn.Module):
-    def forward(self, out_s, out_t, p):
+    def forward(self, out_s, out_t, p, ys=None):
         return out_s.logits.new_zeros(())
 
 
 def _make_adapter(method, model, device, extra):
+    if method == "source":
+        return _Zero()
     if method == "dan":
         from losses import DANLoss
         return DANLoss(weight=float(extra.get("mmd_weight", 1.0)))
@@ -232,4 +235,31 @@ def _make_adapter(method, model, device, extra):
     if method == "jan":
         from losses import JANLoss
         return JANLoss(weight=float(extra.get("jmmd_weight", 1.0)))
+    if method == "mtlda":
+        from losses import MTLDALoss
+        return MTLDALoss(model.feature_dim, device,
+                         domain_weight=float(extra.get("domain_weight", 0.5)),
+                         entropy_weight=float(extra.get("entropy_weight", 0.05)))
+    if method == "cacl":
+        from losses import CACLLoss
+        return CACLLoss(contrast_weight=float(extra.get("contrast_weight", 0.5)),
+                        pseudo_weight=float(extra.get("pseudo_weight", 0.3)),
+                        confidence=float(extra.get("confidence", 0.9)))
+    if method == "uipcl":
+        from losses import UIPCLLoss
+        return UIPCLLoss(model.num_classes,
+                         prototype_weight=float(extra.get("prototype_weight", 0.5)),
+                         pseudo_weight=float(extra.get("pseudo_weight", 0.5)))
+    if method == "pcdm":
+        from losses import PCDMLoss
+        return PCDMLoss(model.num_classes,
+                        prior_weight=float(extra.get("prior_weight", 0.5)),
+                        contrast_weight=float(extra.get("contrast_weight", 0.3)),
+                        confidence=float(extra.get("confidence", 0.9)))
+    if method == "vcmoe":
+        from losses import VCMoELoss
+        return VCMoELoss(model.feature_dim, device,
+                         adv_weight=float(extra.get("adv_weight", 0.3)),
+                         contrast_weight=float(extra.get("contrast_weight", 0.3)),
+                         diversity_weight=float(extra.get("diversity_weight", 0.1)))
     raise ValueError(f"unknown baseline method: {method}")
