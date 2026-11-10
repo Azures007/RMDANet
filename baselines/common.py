@@ -60,11 +60,15 @@ class HSICNN(nn.Module):
         conv = self.features(x).flatten(1)
         feat = self.projection(conv)
         logits = self.classifier(self.dropout(feat))
+        # Single-branch baseline: all three heads return the same logits and the
+        # (unused) spectral branch reports full reliability, so the shared
+        # evaluator's conservative posterior fusion reduces to argmax(logits).
         return SimpleNamespace(
             logits=logits,
             features=feat,
             context_logits=logits,
             spectral_logits=logits,
+            spectral_reliability=torch.ones(x.size(0), device=x.device),
         )
 
 
