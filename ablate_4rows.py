@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Combined ablation for the clean v7.0 build.
 
 Presets (--row):
@@ -98,8 +98,8 @@ def main():
     a = p.parse_args()
 
     if a.tag:
-        missing = [n for n, v in (("prat", a.prat), ("pool", a.pool),
-                                  ("fusion", a.fusion), ("rtml", a.rtml)) if v is None]
+        missing = [n for n, v in (("prat", a.abl_prat), ("pool", a.abl_pool),
+                                  ("fusion", a.abl_fusion), ("rtml", a.abl_rtml)) if v is None]
         if missing:
             raise SystemExit(f"--tag requires explicit: {', '.join('--' + m for m in missing)}")
         cfg = dict(prat=a.abl_prat, pool=a.abl_pool, fusion=a.abl_fusion, rtml=a.abl_rtml)
