@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Combined 4-row ablation for the clean v7.0 build.
+"""Combined ablation for the clean v7.0 build.
 
-Rows: base / drse / rftm / drse_rftm / full
-Baseline = complete framework minus {RFTM, DRSE, RTML}.
-DRSE  = center-guided pooling + reliability-gated spectral fusion (+aux)
-RTML  = cross-epoch reliability memory (history + dependent gates)
+Presets (--row):
+  base      prat0 pool=gap    fusion=off      rtml0
+  drse      prat0 pool=guided fusion=reliable rtml0
+  rftm      prat1 pool=gap    fusion=off      rtml0
+  drse_rftm prat1 pool=guided fusion=reliable rtml0
+  full      prat1 pool=guided fusion=reliable rtml1
+
+Arbitrary combination (--tag NAME --prat 0/1 --pool guided/gap
+                        --fusion reliable/off --rtml 0/1)
 """
 import argparse
 import sys
@@ -18,11 +23,11 @@ DATASET_DIR = {"pavia": "Pavia", "houston": "Houston", "hyrank": "HyRANK"}
 PAVIA_DATA = "/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets"
 
 ROWS = {
-    "base":      dict(prat=0, drse=0, rtml=0),
-    "drse":      dict(prat=0, drse=1, rtml=0),
-    "rftm":      dict(prat=1, drse=0, rtml=0),
-    "drse_rftm": dict(prat=1, drse=1, rtml=0),
-    "full":      dict(prat=1, drse=1, rtml=1),
+    "base":      dict(prat=0, pool="gap",    fusion="off",      rtml=0),
+    "drse":      dict(prat=0, pool="guided", fusion="reliable", rtml=0),
+    "rftm":      dict(prat=1, pool="gap",    fusion="off",      rtml=0),
+    "drse_rftm": dict(prat=1, pool="guided", fusion="reliable", rtml=0),
+    "full":      dict(prat=1, pool="guided", fusion="reliable", rtml=1),
 }
 
 _orig_apply = trainer.apply_ablation_profile
@@ -31,16 +36,19 @@ _orig_apply = trainer.apply_ablation_profile
 def apply_ablate(args):
     args.ablation_id = "full"
     args = _orig_apply(args)
-    row = ROWS[args.row]
+    row = args._ablate_cfg
 
     args.use_prat = bool(row["prat"])
 
-    if row["drse"]:
+    if row["pool"] == "guided":
         args.pooling_mode = "guided"
+    else:
+        args.pooling_mode = "gap"
+
+    if row["fusion"] == "reliable":
         args.spectral_fusion_mode = "reliable"
         args.use_spectral_aux = True
     else:
-        args.pooling_mode = "gap"
         args.spectral_fusion_mode = "off"
         args.use_spectral_aux = False
 
@@ -78,11 +86,29 @@ trainer.apply_ablation_profile = apply_ablate
 
 def main():
     p = trainer.build_parser()
-    p.add_argument("--row", choices=sorted(ROWS), required=True)
+    p.add_argument("--row", choices=sorted(ROWS))
+    p.add_argument("--tag", default=None, help="custom run name; requires explicit switches")
+    p.add_argument("--prat", type=int, choices=[0, 1])
+    p.add_argument("--pool", choices=["guided", "gap"])
+    p.add_argument("--fusion", choices=["reliable", "off"])
+    p.add_argument("--rtml", type=int, choices=[0, 1])
     p.add_argument("--dataset", choices=sorted(DATASET_DIR), required=True)
     p.add_argument("--data-root", default="/root/autodl-tmp/Datasets")
     p.add_argument("--out-root", default=str(ROOT / "results_ablation_clean"))
     a = p.parse_args()
+
+    if a.tag:
+        missing = [n for n, v in (("prat", a.prat), ("pool", a.pool),
+                                  ("fusion", a.fusion), ("rtml", a.rtml)) if v is None]
+        if missing:
+            raise SystemExit(f"--tag requires explicit: {', '.join('--' + m for m in missing)}")
+        cfg = dict(prat=a.prat, pool=a.pool, fusion=a.fusion, rtml=a.rtml)
+        run_name = a.tag
+    else:
+        if not a.row:
+            raise SystemExit("provide --row preset or --tag with explicit switches")
+        cfg = ROWS[a.row]
+        run_name = a.row
 
     a = trainer.load_config_into_args(a, str(ROOT / "datasets" / a.dataset / "config.yaml"))
     if a.dataset == "pavia":
@@ -90,9 +116,10 @@ def main():
     else:
         a.data_path = str(Path(a.data_root) / DATASET_DIR[a.dataset])
     a.save_path = str(Path(a.out_root) / a.dataset)
-    a.run_name = f"{a.row}_seed{a.seed}"
+    a.run_name = f"{run_name}_seed{a.seed}"
     a.skip_final_evaluation = True
-    print(f"[ablate] {a.dataset} row={a.row} data={a.data_path} run={a.run_name}")
+    a._ablate_cfg = cfg
+    print(f"[ablate] {a.dataset} cfg={cfg} data={a.data_path} run={a.run_name}")
     trainer.train(a)
 
 
