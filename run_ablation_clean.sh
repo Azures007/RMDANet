@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 DS=${1:-houston}
 SEED=${2:-1237}
@@ -19,7 +19,7 @@ for ROW in $ROWS; do
   fi
   rm -rf "$RUN"
   python -u ablate_4rows.py --dataset "$DS" --row "$ROW" --seed "$SEED" \
-    --gpu 0 --workers 4 2>&1 | tee "/root/autodl-tmp/ablation_clean_${DS}_${ROW}.log"
+    --gpu 0 --num_workers 4 2>&1 | tee "/root/autodl-tmp/ablation_clean_${DS}_${ROW}.log"
 
   if [ "$DS" = "pavia" ]; then
     DATA=/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets/Pavia
