@@ -30,36 +30,40 @@ eval_row() {  # dataset tag data_path
     --output "$RUN/target_final_once.json" --confirm-final-eval
 }
 
-run_dataset() {  # dataset data_path alpha rows...
-  local ds=$1 data=$2 alpha=$3; shift 3
+run_dataset() {  # dataset data_path alpha extra_fusion_args rows...
+  local ds=$1 data=$2 alpha=$3 extra=$4; shift 4
   export DRSE_ALPHA_LOGIT="$alpha"
   for spec in "$@"; do
     set -- $spec
     local tag=$1
-    train_row "$ds" "${ds}_${tag}" "$2" "$3" "$4" "$5"
+    train_row "$ds" "${ds}_${tag}" "$2" "$3" "$4" "$5" $extra
     eval_row "$ds" "${ds}_${tag}" "$data"
   done
 }
 
-# Houston and Pavia: alpha logit -4 (residual strength 0.018), 4 cumulative rows
-run_dataset houston "$HOUSTON_DATA" -4 \
+# Final protocol: bidirectional spectral reliability fusion on DRSE rows,
+# residual center-guided pooling, per-dataset alpha (see datasets/*/config.yaml).
+# Houston and Pavia: alpha logit -4 (residual strength 0.018)
+run_dataset houston "$HOUSTON_DATA" -4 "" \
   "base 0 gap off 0" \
-  "drse 0 guided off 0" \
-  "drse_rftm 1 guided off 0" \
-  "full 1 guided off 1"
+  "drse 0 guided bidirectional 0" \
+  "drse_rftm 1 guided bidirectional 0" \
+  "full 1 guided bidirectional 1"
 
-run_dataset pavia "$PAVIA_DATA" -4 \
+run_dataset pavia "$PAVIA_DATA" -4 "" \
   "base 0 gap off 0" \
-  "drse 0 guided off 0" \
-  "drse_rftm 1 guided off 0" \
-  "full 1 guided off 1"
+  "drse 0 guided bidirectional 0" \
+  "drse_rftm 1 guided bidirectional 0" \
+  "full 1 guided bidirectional 1"
 
-# HyRANK: alpha logit -3.5 (0.029), 4 cumulative rows (RTML is beneficial here)
-run_dataset hyrank "$HYRANK_DATA" -3.5 \
+# HyRANK: alpha logit -3.5, conservative bidirectional fusion parameters
+# (set HYRANK_FUSION_CFG to override the tuning found by the parameter sweep).
+HYRANK_FUSION_CFG=${HYRANK_FUSION_CFG:-"--fusion_delta=-0.8 --fusion_w_max=0.50"}
+run_dataset hyrank "$HYRANK_DATA" -3.5 "$HYRANK_FUSION_CFG" \
   "base 0 gap off 0" \
-  "drse 0 guided off 0" \
-  "drse_rftm 1 guided off 0" \
-  "full 1 guided off 1"
+  "drse 0 guided bidirectional 0" \
+  "drse_rftm 1 guided bidirectional 0" \
+  "full 1 guided bidirectional 1"
 
 echo
 echo "================ FINAL SUMMARY ================"

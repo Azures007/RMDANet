@@ -93,24 +93,26 @@ python tests/test_drse_residual.py
 
 ## 3. 结果（seed 1237，定稿）
 
-详见 `docs/ABLATION_RESULTS.md`。摘要：
+详见 `docs/ABLATION_RESULTS.md`。摘要（seed 1237，双向可靠性融合）：
 
 | Dataset | Baseline | +DRSE | +DRSE+RFTM | Full |
 |---|---|---|---|---|
-| Houston（α=−4） | 74.77 | 75.21 | 76.35 | 77.26 |
-| Pavia（α=−4） | 65.62 | 66.25 | 84.19 | 84.36 |
-| HyRANK（α=−3.5） | 55.05 | 55.83 | 56.51 | 58.20 |
+| Houston（α=−4） | 74.77 | 76.12 | 78.48 | 79.06 |
+| Pavia（α=−4） | 65.62 | 67.92 | 83.45 | 85.73 |
+| HyRANK（α=−3.5） | 55.05 | 待定 | 待定 | 待定（融合 off 参考：55.83/56.51/58.20） |
 
-模块贡献（OA 增量）：
+模块贡献（OA 增量，seed 1237）：
 
 | 模块 | Houston | Pavia | HyRANK |
 |---|---|---|---|
-| DRSE | +0.44 | +0.63 | +0.78 |
-| RFTM | +1.14 | +17.94 | +0.68 |
-| RTML | +0.91 | +0.17 | +1.69 |
+| DRSE（残差池化 + 双向融合） | +1.35 | +2.30 | 待定 |
+| RFTM | +2.36 | +15.53 | 待定 |
+| RTML | +0.58（seed 1233 为 −0.74，不稳定） | +2.28 | 待定 |
 
 DRSE 残差强度 α 为数据集级超参，写在各自 `datasets/*/config.yaml` 的 `uda.pool_alpha_logit`：
 Houston/Pavia 用 `-4.0`（α_init=0.018），HyRANK 用 `-3.5`（α_init=0.029）。
+HyRANK 的双向融合使用保守参数（`--fusion_delta` 更负、`--fusion_w_max` 更低），
+可通过环境变量 `HYRANK_FUSION_CFG` 覆盖。
 
 ## 4. 文件说明
 
