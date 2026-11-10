@@ -73,9 +73,20 @@ python -u eval_tuned.py --checkpoint "$RUN/selected_model.pt" \
 
 | Dataset | Baseline | +DRSE | +DRSE+RFTM | Full |
 |---|---|---|---|---|
-| Houston | 74.77 | 75.21 | 76.35 | 77.26 |
-| Pavia | 65.62 | 66.25 | 84.19 | 84.36 |
-| HyRANK | 55.05 | 55.11 | 57.63 | 57.63（RTML 不启用，待定） |
+| Houston（α=−4） | 74.77 | 75.21 | 76.35 | 77.26 |
+| Pavia（α=−4） | 65.62 | 66.25 | 84.19 | 84.36 |
+| HyRANK（α=−3.5） | 55.05 | 55.83 | 56.51 | 58.20 |
+
+模块贡献（OA 增量）：
+
+| 模块 | Houston | Pavia | HyRANK |
+|---|---|---|---|
+| DRSE | +0.44 | +0.63 | +0.78 |
+| RFTM | +1.14 | +17.94 | +0.68 |
+| RTML | +0.91 | +0.17 | +1.69 |
+
+DRSE 残差强度 α 为数据集级超参：Houston/Pavia 用 `DRSE_ALPHA_LOGIT=-4`（0.018），
+HyRANK 用 `DRSE_ALPHA_LOGIT=-3.5`（0.029）。
 
 ## 4. 文件说明
 

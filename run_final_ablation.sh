@@ -30,8 +30,9 @@ eval_row() {  # dataset tag data_path
     --output "$RUN/target_final_once.json" --confirm-final-eval
 }
 
-run_dataset() {  # dataset data_path rows...
-  local ds=$1 data=$2; shift 2
+run_dataset() {  # dataset data_path alpha rows...
+  local ds=$1 data=$2 alpha=$3; shift 3
+  export DRSE_ALPHA_LOGIT="$alpha"
   for spec in "$@"; do
     set -- $spec
     local tag=$1
@@ -40,24 +41,25 @@ run_dataset() {  # dataset data_path rows...
   done
 }
 
-# Houston and Pavia: 4 cumulative rows (DRSE -> +RFTM -> +RTML)
-run_dataset houston "$HOUSTON_DATA" \
+# Houston and Pavia: alpha logit -4 (residual strength 0.018), 4 cumulative rows
+run_dataset houston "$HOUSTON_DATA" -4 \
   "base 0 gap off 0" \
   "drse 0 guided off 0" \
   "drse_rftm 1 guided off 0" \
   "full 1 guided off 1"
 
-run_dataset pavia "$PAVIA_DATA" \
+run_dataset pavia "$PAVIA_DATA" -4 \
   "base 0 gap off 0" \
   "drse 0 guided off 0" \
   "drse_rftm 1 guided off 0" \
   "full 1 guided off 1"
 
-# HyRANK: 3 rows, final model does not use RTML
-run_dataset hyrank "$HYRANK_DATA" \
+# HyRANK: alpha logit -3.5 (0.029), 4 cumulative rows (RTML is beneficial here)
+run_dataset hyrank "$HYRANK_DATA" -3.5 \
   "base 0 gap off 0" \
   "drse 0 guided off 0" \
-  "drse_rftm 1 guided off 0"
+  "drse_rftm 1 guided off 0" \
+  "full 1 guided off 1"
 
 echo
 echo "================ FINAL SUMMARY ================"
