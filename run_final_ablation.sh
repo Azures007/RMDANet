@@ -56,14 +56,13 @@ run_dataset pavia "$PAVIA_DATA" -4 "" \
   "drse_rftm 1 guided bidirectional 0" \
   "full 1 guided bidirectional 1"
 
-# HyRANK: alpha logit -3.5, conservative bidirectional fusion parameters
-# (set HYRANK_FUSION_CFG to override the tuning found by the parameter sweep).
-HYRANK_FUSION_CFG=${HYRANK_FUSION_CFG:-"--fusion_delta=-0.8 --fusion_w_max=0.50"}
-run_dataset hyrank "$HYRANK_DATA" -3.5 "$HYRANK_FUSION_CFG" \
+# HyRANK: fusion disabled by the label-free rule (target spectral-branch
+# confidence 0.599 < 0.65), alpha logit -3.5 (residual strength 0.029).
+run_dataset hyrank "$HYRANK_DATA" -3.5 "" \
   "base 0 gap off 0" \
-  "drse 0 guided bidirectional 0" \
-  "drse_rftm 1 guided bidirectional 0" \
-  "full 1 guided bidirectional 1"
+  "drse 0 guided off 0" \
+  "drse_rftm 1 guided off 0" \
+  "full 1 guided off 1"
 
 echo
 echo "================ FINAL SUMMARY ================"
