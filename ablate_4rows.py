@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Combined ablation for the clean v7.0 build.
 
 Presets (--row):
@@ -88,10 +88,10 @@ def main():
     p = trainer.build_parser()
     p.add_argument("--row", choices=sorted(ROWS))
     p.add_argument("--tag", default=None, help="custom run name; requires explicit switches")
-    p.add_argument("--prat", type=int, choices=[0, 1])
-    p.add_argument("--pool", choices=["guided", "gap"])
-    p.add_argument("--fusion", choices=["reliable", "off"])
-    p.add_argument("--rtml", type=int, choices=[0, 1])
+    p.add_argument("--abl-prat", type=int, choices=[0, 1])
+    p.add_argument("--abl-pool", choices=["guided", "gap"])
+    p.add_argument("--abl-fusion", choices=["reliable", "off"])
+    p.add_argument("--abl-rtml", type=int, choices=[0, 1])
     p.add_argument("--dataset", choices=sorted(DATASET_DIR), required=True)
     p.add_argument("--data-root", default="/root/autodl-tmp/Datasets")
     p.add_argument("--out-root", default=str(ROOT / "results_ablation_clean"))
@@ -102,7 +102,7 @@ def main():
                                   ("fusion", a.fusion), ("rtml", a.rtml)) if v is None]
         if missing:
             raise SystemExit(f"--tag requires explicit: {', '.join('--' + m for m in missing)}")
-        cfg = dict(prat=a.prat, pool=a.pool, fusion=a.fusion, rtml=a.rtml)
+        cfg = dict(prat=a.abl_prat, pool=a.abl_pool, fusion=a.abl_fusion, rtml=a.abl_rtml)
         run_name = a.tag
     else:
         if not a.row:
@@ -125,3 +125,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
