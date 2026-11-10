@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 DS=${1:-houston}
 SEED=${2:-1237}
