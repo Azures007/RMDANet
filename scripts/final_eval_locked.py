@@ -43,11 +43,26 @@ def main():
     target=load_target_image_only(t.data_path,t.target_name,normalize_mode=mode)
     aligned,_=align_target_bands(src.image,target.image,strength=t.band_alignment_strength,
                                   renormalize=mode!='median')
+    # Match the checkpoint structure: older checkpoints (pre-residual) have no
+    # `_alpha_logit`, newer (residual DRSE) ones do.
+    has_residual_alpha = any(str(k).endswith("_alpha_logit") for k in checkpoint["model"].keys())
     model=DualReliabilityEncoder(bands=src.image.shape[-1],num_classes=t.num_classes,
        projection_dim=t.projection_dim,projection_norm=t.projection_norm,
        aspp_mode=t.aspp_mode,pooling_mode=t.pooling_mode,
        spectral_fusion_mode=t.spectral_fusion_mode,amplitude_channel=t.amplitude_channel,
-       enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0)).to(device)
+       enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0),
+       pool_center_size=getattr(t,"pool_center_size",5),
+       pool_temperature=getattr(t,"pool_temperature",0.30),
+       pool_gate_init=tuple(float(v) for v in str(getattr(t,"pool_gate_init","0.6,0.3,0.1")).split(",")),
+       pool_residual=has_residual_alpha,
+       pool_alpha_logit=getattr(t,"pool_alpha_logit",-4.0),
+       fusion_alpha=getattr(t,"fusion_alpha",1.0),
+       fusion_delta=getattr(t,"fusion_delta",-0.2),
+       fusion_tau_a=getattr(t,"fusion_tau_a",0.20),
+       fusion_t_a=getattr(t,"fusion_t_a",0.10),
+       fusion_t_w=getattr(t,"fusion_t_w",0.15),
+       fusion_w_min=getattr(t,"fusion_w_min",0.10),
+       fusion_w_max=getattr(t,"fusion_w_max",0.90)).to(device)
     model.load_state_dict(checkpoint['model'],strict=True);model.eval()
     print('[FINAL EVAL] Loading TARGET GT NOW for reporting ONLY')
     loader=build_target_evaluation_loader(t,aligned)
