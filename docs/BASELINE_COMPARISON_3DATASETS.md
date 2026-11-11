@@ -2,7 +2,7 @@
 
 统一协议：源域 **180 标签/类**，目标域训练零标签，目标 GT 只在最终评估打开一次；
 50 epochs（RMDANet 为 50×40 steps）；seed 1237；单卡 RTX 4090。
-复现基线使用保幅度 median 归一化；RMDANet 使用逐像元 L2 + 残差 DRSE + 双向融合 + RFTM + RTML。
+复现基线使用保幅度 median 归一化；RMDANet 使用逐像元 L2 + RCGP（DRSE 子模块） + 双向融合 + RFTM + RTML。
 
 ## Pavia（PaviaU → PaviaC）
 
@@ -58,7 +58,7 @@
    共享轻量 HSI-CNN backbone（3 conv + GAP + FC），仅适配损失不同；使用保幅度 median 归一化。
    其中 MTLDA / VCMoE 无公开官方代码；UIPCL 官方仓库的训练集使用目标域标签（半监督），
    不适用于 UDA 比较；PCDM-UDA 官方实现依赖 Gurobi 求解器（受限 license 无法处理目标域规模）。
-3. **RMDANet** 使用逐像元 L2 归一化 + 残差 DRSE + 双向可靠性融合 + RFTM + RTML。
+3. **RMDANet** 使用逐像元 L2 归一化 + RCGP（DRSE 子模块） + 双向可靠性融合 + RFTM + RTML。
 4. 所有方法共享同一数据切分与同一评估代码（OA/AA/Kappa，逐像素混淆矩阵）。
 
 ## 结论

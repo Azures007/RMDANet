@@ -9,7 +9,7 @@ export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
-# DRSE residual center-guided pooling is baked into core/model.py and configured
+# RCGP residual center-guided pooling (sub-module of DRSE) is baked into core/model.py and configured
 # per dataset in datasets/*/config.yaml (pool_center_size/pool_temperature/...).
 
 PAVIA_DATA=/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets/Pavia

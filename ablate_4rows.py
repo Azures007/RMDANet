@@ -25,6 +25,7 @@ PAVIA_DATA = "/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone
 
 ROWS = {
     "base":      dict(prat=0, pool="gap",    fusion="off", rtml=0),
+    "drseoff":   dict(prat=0, pool="gap",    fusion="off", rtml=0, drse=0),
     "drse":      dict(prat=0, pool="guided", fusion="off", rtml=0),
     "rftm":      dict(prat=1, pool="gap",    fusion="off", rtml=0),
     "drse_rftm": dict(prat=1, pool="guided", fusion="off", rtml=0),
@@ -41,12 +42,20 @@ def apply_ablate(args):
 
     args.use_prat = bool(row["prat"])
 
+    # DRSE as a whole: False removes the spectral branch + reliability fusion
+    # (single-branch baseline); True keeps the dual-branch encoder.
+    args.use_spectral_branch = bool(row.get("drse", 1))
+    if not args.use_spectral_branch:
+        args.spectral_fusion_mode = "off"
+        args.use_spectral_aux = False
+
     if row["pool"] == "guided":
         args.pooling_mode = "guided"
     else:
         args.pooling_mode = "gap"
 
-    # DRSE residual center-guided pooling (baked in core/model.py)
+    # RCGP (Residual Center-Guided Pooling) settings: a sub-module inside the
+    # spatial branch of DRSE, not DRSE itself.
     args.pool_center_size = 5
     args.pool_temperature = 0.30
     args.pool_gate_init = "0.6,0.3,0.1"
@@ -112,6 +121,8 @@ def main():
     p = trainer.build_parser()
     p.add_argument("--row", choices=sorted(ROWS))
     p.add_argument("--tag", default=None, help="custom run name; requires explicit switches")
+    p.add_argument("--abl-drse", type=int, choices=[0, 1],
+                   help="0 = single-branch (spectral branch + fusion removed); 1 = dual-branch DRSE")
     p.add_argument("--abl-prat", type=int, choices=[0, 1])
     p.add_argument("--abl-pool", choices=["guided", "gap"])
     p.add_argument("--abl-fusion", choices=["reliable", "off", "bidirectional"])
@@ -132,6 +143,7 @@ def main():
         if missing:
             raise SystemExit(f"--tag requires explicit: {', '.join('--' + m for m in missing)}")
         cfg = dict(prat=a.abl_prat, pool=a.abl_pool, fusion=a.abl_fusion, rtml=a.abl_rtml,
+                   drse=(1 if a.abl_drse is None else a.abl_drse),
                    guard=a.abl_guard, spatial=a.abl_spatial, proto=a.abl_proto,
                    confusion=a.abl_confusion, history=a.abl_history)
         run_name = a.tag
