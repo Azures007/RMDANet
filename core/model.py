@@ -509,6 +509,12 @@ class DualReliabilityEncoder(nn.Module):
             self.spectral_encoder = CenterSpectralShapeEncoder(
                 self.bands, self.projection_dim, amplitude=self.amplitude_channel
             )
+        else:
+            self.spectral_encoder = None
+        self.classifier = CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
+        self.classifier2 = (CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
+                            if self.enable_dual_head else None)
+        if self.use_spectral_branch:
             self.spectral_fusion = SpectralReliabilityFusion(
                 self.projection_dim,
                 mode=spectral_fusion_mode,
@@ -521,11 +527,7 @@ class DualReliabilityEncoder(nn.Module):
                 fusion_w_max=fusion_w_max,
             )
         else:
-            self.spectral_encoder = None
             self.spectral_fusion = None
-        self.classifier = CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
-        self.classifier2 = (CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
-                            if self.enable_dual_head else None)
         self.reset_parameters()
         self._restore_safe_initialization()
 
