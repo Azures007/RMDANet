@@ -31,7 +31,7 @@ training:
   amp: true
 
 uda:
-  # DRSE: residual center-guided pooling (baked into core/model.py)
+  # RCGP: residual center-guided pooling, sub-module of DRSE (baked into core/model.py)
   pool_center_size: 5
   pool_temperature: 0.30
   pool_gate_init: "0.6,0.3,0.1"
@@ -50,8 +50,8 @@ uda:
   lmmd_start_epoch: 25
   lmmd_warm_epochs: 8
   # pseudo-label gates
-  pseudo_confidence: 0.95
-  reliability_threshold: 0.45
+  pseudo_confidence: 0.90
+  reliability_threshold: 0.35
   pseudo_margin: 0.10
   pseudo_min_per_class: 0
   # module set: CCA + CORAL + LMMD + prototype alignment
@@ -61,7 +61,7 @@ uda:
   lambda_coral: 0.3
   lambda_lmmd: 0.3
   prototype_align_flag: true
-  prototype_weight: 0.03
+  prototype_weight: 0.06
   prototype_confidence: 0.95
   prototype_temperature: 0.08
   include_target_scale_mi: true
@@ -69,7 +69,7 @@ uda:
   use_early_target_adaptation: true
   memory_update_start_epoch: 1
   # dataset-specific PRAT strength
-  prat_style_max: 0.4
+  prat_style_max: 0.6
   prat_warm_epochs: 23
   # multi-prototype quotas
   cempa_class_cap: 24

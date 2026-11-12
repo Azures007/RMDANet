@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Legacy evaluation entry.
 
-The residual DRSE is now baked into ``core/model.py`` (``CenterGuidedPooling``
+The residual RCGP (DRSE sub-module) is now baked into ``core/model.py`` (``CenterGuidedPooling``
 with ``residual=True`` and a learnable ``_alpha_logit``), so normal checkpoints
 load with ``scripts/final_eval_locked.py`` directly.
 

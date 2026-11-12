@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that the residual DRSE formula is implemented in core/model.py.
+"""Verify that the residual RCGP formula is implemented in core/model.py.
 
 Checks:
   1. CenterGuidedPooling creates a learnable `_alpha_logit` parameter when
@@ -50,7 +50,7 @@ def main() -> None:
     max_err = float((pooled - expected).abs().max())
     assert max_err < 1e-6, f"residual formula mismatch, max |err| = {max_err}"
 
-    print(f"[OK] residual DRSE formula verified: alpha_init={alpha.item():.4f}, max_err={max_err:.2e}")
+    print(f"[OK] residual RCGP formula verified: alpha_init={alpha.item():.4f}, max_err={max_err:.2e}")
 
 
 if __name__ == "__main__":

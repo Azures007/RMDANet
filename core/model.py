@@ -446,6 +446,7 @@ class DualReliabilityEncoder(nn.Module):
         pooling_mode: str = "guided",
         spectral_fusion_mode: str = "reliable",
         amplitude_channel: bool = False,
+        use_spectral_branch: bool = True,
         enable_dual_head: bool = False,
         pool_center_size: int = 3,
         pool_temperature: float = 0.12,
@@ -499,23 +500,34 @@ class DualReliabilityEncoder(nn.Module):
             nn.Linear(256, self.projection_dim),
         )
         self.amplitude_channel = bool(amplitude_channel)
-        self.spectral_encoder = CenterSpectralShapeEncoder(
-            self.bands, self.projection_dim, amplitude=self.amplitude_channel
-        )
+        # DRSE (Dual-branch Reliability Spectral-spatial Encoder) = spatial branch
+        # + spectral branch + reliability fusion.  ``use_spectral_branch=False``
+        # removes the spectral branch and the fusion, i.e. it disables DRSE as a
+        # whole (single-branch baseline for the ablation study).
+        self.use_spectral_branch = bool(use_spectral_branch)
+        if self.use_spectral_branch:
+            self.spectral_encoder = CenterSpectralShapeEncoder(
+                self.bands, self.projection_dim, amplitude=self.amplitude_channel
+            )
+        else:
+            self.spectral_encoder = None
         self.classifier = CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
         self.classifier2 = (CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
                             if self.enable_dual_head else None)
-        self.spectral_fusion = SpectralReliabilityFusion(
-            self.projection_dim,
-            mode=spectral_fusion_mode,
-            fusion_alpha=fusion_alpha,
-            fusion_delta=fusion_delta,
-            fusion_tau_a=fusion_tau_a,
-            fusion_t_a=fusion_t_a,
-            fusion_t_w=fusion_t_w,
-            fusion_w_min=fusion_w_min,
-            fusion_w_max=fusion_w_max,
-        )
+        if self.use_spectral_branch:
+            self.spectral_fusion = SpectralReliabilityFusion(
+                self.projection_dim,
+                mode=spectral_fusion_mode,
+                fusion_alpha=fusion_alpha,
+                fusion_delta=fusion_delta,
+                fusion_tau_a=fusion_tau_a,
+                fusion_t_a=fusion_t_a,
+                fusion_t_w=fusion_t_w,
+                fusion_w_min=fusion_w_min,
+                fusion_w_max=fusion_w_max,
+            )
+        else:
+            self.spectral_fusion = None
         self.reset_parameters()
         self._restore_safe_initialization()
 
@@ -533,12 +545,13 @@ class DualReliabilityEncoder(nn.Module):
         initial = torch.tensor(self.pool_gate_init, dtype=self.pool.gate[-1].bias.dtype)
         with torch.no_grad():
             self.pool.gate[-1].bias.copy_(initial.log())
-        nn.init.zeros_(self.spectral_fusion.gate[-1].weight)
-        init_gate = 0.12 / self.spectral_fusion.max_gate
-        nn.init.constant_(
-            self.spectral_fusion.gate[-1].bias,
-            math.log(init_gate / (1.0 - init_gate)),
-        )
+        if self.spectral_fusion is not None:
+            nn.init.zeros_(self.spectral_fusion.gate[-1].weight)
+            init_gate = 0.12 / self.spectral_fusion.max_gate
+            nn.init.constant_(
+                self.spectral_fusion.gate[-1].bias,
+                math.log(init_gate / (1.0 - init_gate)),
+            )
 
     def classify_features(self, features: torch.Tensor) -> torch.Tensor:
         return self.classifier(features)
@@ -552,13 +565,22 @@ class DualReliabilityEncoder(nn.Module):
         spatial, scale_weights = self.micro_aspp(spatial)
         pooled, center_weights, attention_map = self.pool(spatial)
         context_features = F.normalize(self.projection(pooled), dim=1)
-        spectral_features = self.spectral_encoder(x)
         context_logits = self.classifier(context_features)
-        spectral_logits = self.classifier(spectral_features)
-        features, _, spectral_reliability = self.spectral_fusion(
-            context_features, spectral_features, context_logits, spectral_logits
-        )
-        logits = self.classifier(features)
+        if self.spectral_encoder is not None:
+            spectral_features = self.spectral_encoder(x)
+            spectral_logits = self.classifier(spectral_features)
+            features, _, spectral_reliability = self.spectral_fusion(
+                context_features, spectral_features, context_logits, spectral_logits
+            )
+            logits = self.classifier(features)
+        else:
+            # Single-branch (DRSE disabled): no spectral branch, no fusion.
+            features = context_features
+            logits = context_logits
+            spectral_logits = None
+            spectral_reliability = torch.ones(
+                context_features.size(0), device=context_features.device, dtype=context_features.dtype
+            )
         logits2 = self.classifier2(features) if self.classifier2 is not None else None
         return ModelOutput(
             logits=logits,
