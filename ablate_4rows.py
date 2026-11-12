@@ -55,8 +55,9 @@ def apply_ablate(args):
         args.pooling_mode = "gap"
 
     # RCGP (Residual Center-Guided Pooling) settings: a sub-module inside the
-    # spatial branch of DRSE, not DRSE itself.
-    args.pool_center_size = 5
+    # spatial branch of DRSE, not DRSE itself.  Center window can be overridden
+    # per dataset through ABL_POOL_CENTER_SIZE (tooling only, model untouched).
+    args.pool_center_size = int(os.environ.get("ABL_POOL_CENTER_SIZE", "5"))
     args.pool_temperature = 0.30
     args.pool_gate_init = "0.6,0.3,0.1"
     args.pool_residual = True

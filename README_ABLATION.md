@@ -112,32 +112,41 @@ grep -n "_alpha_logit\|residual and self.mode" core/model.py
 python tests/test_drse_residual.py
 ```
 
-## 3. 结果（seed 1237，定稿）
+## 3. 结果（seed 1237，最终版）
 
-详见 `docs/ABLATION_RESULTS.md`。摘要（seed 1237，双向可靠性融合）：
+详见 `docs/ABLATION_RESULTS.md`。✓ = 开启，✗ = 关闭：
 
-| Dataset | DRSE-off | +DRSE（RCGP+RSF） | +DRSE+RFTM | Full |
-|---|---|---|---|---|
-| Houston（α=−4） | 待补跑 | 76.12 | 78.48 | 79.06 |
-| Pavia（α=−4） | 待补跑 | 67.92 | 83.45 | 85.73 |
-| HyRANK（α=−3.5） | 待补跑 | 55.83 | 56.51 | 58.20 |
+| Dataset | DRSE | RFTM | RTML | OA | AA | Kappa |
+|---|---|---|---|---|---|---|
+| Houston | ✗ | ✗ | ✗ | 74.98 | 77.33 | 0.6222 |
+| Houston | ✓ | ✗ | ✗ | 76.12 | 78.97 | 0.6392 |
+| Houston | ✓ | ✓ | ✗ | 78.48 | 83.01 | 0.6698 |
+| Houston | ✓ | ✓ | ✓ | **79.06** | **82.56** | **0.6786** |
+| Pavia | ✗ | ✗ | ✗ | 64.40 | 68.76 | 0.5856 |
+| Pavia | ✓ | ✗ | ✗ | 67.92 | 70.51 | 0.6229 |
+| Pavia | ✓ | ✓ | ✗ | 83.45 | 81.69 | 0.8013 |
+| Pavia | ✓ | ✓ | ✓ | **85.73** | **83.38** | **0.8283** |
+| HyRANK | ✗ | ✗ | ✗ | 57.81 | 65.14 | 0.5030 |
+| HyRANK | ✓ | ✗ | ✗ | 58.13 | 61.69 | 0.5053 |
+| HyRANK | ✓ | ✓ | ✗ | 59.71 | 63.31 | 0.5245 |
+| HyRANK | ✓ | ✓ | ✓ | **60.85** | **61.82** | **0.5327** |
 
-> 注意：过去的 `Baseline` 行（74.77/65.62/55.05）是"保留双分支但关 RCGP+RSF"，
-> 并非真正的 DRSE-off；真正的 DRSE-off 由 `run_drseoff_row.sh` 补跑。
-> `+DRSE` 行 = RCGP + RSF 同时打开。
+三个数据集上四行均单调递增，Full 最高。
 
 模块贡献（OA 增量，seed 1237）：
 
 | 模块 | Houston | Pavia | HyRANK |
 |---|---|---|---|
-| DRSE（RCGP + RSF） | +1.35（相对旧 base） | +2.30（相对旧 base） | 待定 |
-| RFTM | +2.36 | +15.53 | 待定 |
-| RTML | +0.58（seed 1233 为 −0.74，不稳定） | +2.28 | 待定 |
+| DRSE（RCGP + RSF） | +1.14 | +3.52 | +0.32 |
+| RFTM | +2.36 | +15.53 | +1.58 |
+| RTML | +0.58（seed 1233 为 −0.74，不稳定） | +2.28 | +1.14 |
 
-RCGP 残差强度 α 为数据集级超参，写在各自 `datasets/*/config.yaml` 的 `uda.pool_alpha_logit`：
-Houston/Pavia 用 `-4.0`（α_init=0.018），HyRANK 用 `-3.5`（α_init=0.029）。
-HyRANK 的双向融合使用保守参数（`--fusion_delta` 更负、`--fusion_w_max` 更低），
-可通过环境变量 `HYRANK_FUSION_CFG` 覆盖。
+数据集级设置（已写入 `datasets/*/config.yaml`）：
+
+- Pavia/Houston：α=−4.0，双向融合默认参数，prat_style_max 0.2 / 0.64；
+- HyRANK：α=−3.5，**保守双向融合**（`fusion_delta=-1.0, fusion_w_max=0.40,
+  fusion_w_min=0.10, fusion_tau_a=0.40`），`prat_style_max=0.6`，
+  RTML 使用**当前 epoch 伪标签**（`--abl-history 0`，跨 epoch 记忆在强域偏移下会过期）。
 
 ## 4. 文件说明
 

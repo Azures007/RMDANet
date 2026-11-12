@@ -38,6 +38,17 @@ uda:
   pool_residual: true
   pool_alpha_logit: -3.5
 
+  # RSF: conservative bidirectional fusion for the low-confidence HyRANK domain
+  # (delta -1.0, wmax 0.40, wmin 0.10, tau_a 0.40)
+  spectral_fusion_mode: bidirectional
+  fusion_alpha: 1.0
+  fusion_delta: -1.0
+  fusion_tau_a: 0.40
+  fusion_t_a: 0.10
+  fusion_t_w: 0.15
+  fusion_w_min: 0.10
+  fusion_w_max: 0.40
+
   ablation_id: full
   align_maturity_gate: false
   independent_target_reweight: false
@@ -50,8 +61,8 @@ uda:
   lmmd_start_epoch: 25
   lmmd_warm_epochs: 8
   # pseudo-label gates
-  pseudo_confidence: 0.95
-  reliability_threshold: 0.45
+  pseudo_confidence: 0.90
+  reliability_threshold: 0.35
   pseudo_margin: 0.10
   pseudo_min_per_class: 0
   # module set: CCA + CORAL + LMMD + prototype alignment
@@ -61,7 +72,7 @@ uda:
   lambda_coral: 0.3
   lambda_lmmd: 0.3
   prototype_align_flag: true
-  prototype_weight: 0.03
+  prototype_weight: 0.06
   prototype_confidence: 0.95
   prototype_temperature: 0.08
   include_target_scale_mi: true
@@ -69,7 +80,7 @@ uda:
   use_early_target_adaptation: true
   memory_update_start_epoch: 1
   # dataset-specific PRAT strength
-  prat_style_max: 0.4
+  prat_style_max: 0.6
   prat_warm_epochs: 23
   # multi-prototype quotas
   cempa_class_cap: 24

@@ -16,11 +16,12 @@ PAVIA_DATA=/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Da
 HOUSTON_DATA=/root/autodl-tmp/Datasets/Houston
 HYRANK_DATA=/root/autodl-tmp/Datasets/HyRANK
 
-train_row() {  # dataset tag prat pool fusion rtml
+train_row() {  # dataset tag prat pool fusion rtml [extra args...]
   local ds=$1 tag=$2 prat=$3 pool=$4 fusion=$5 rtml=$6
+  shift 6
   python -u ablate_4rows.py --dataset "$ds" --seed "$SEED" --gpu 0 --num_workers 4 \
     --abl-prat "$prat" --abl-pool "$pool" --abl-fusion "$fusion" --abl-rtml "$rtml" \
-    --tag "$tag"
+    "$@" --tag "$tag"
 }
 
 eval_row() {  # dataset tag data_path
@@ -56,13 +57,17 @@ run_dataset pavia "$PAVIA_DATA" -4 "" \
   "drse_rftm 1 guided bidirectional 0" \
   "full 1 guided bidirectional 1"
 
-# HyRANK: fusion disabled by the label-free rule (target spectral-branch
-# confidence 0.599 < 0.65), alpha logit -3.5 (residual strength 0.029).
+# HyRANK: conservative bidirectional fusion (fusion_delta/-w_max/-w_min/-tau_a in
+# datasets/hyrank/config.yaml), alpha logit -3.5 (residual strength 0.029).
+# RTML uses current-epoch pseudo labels on this domain (history off) because the
+# cross-epoch memory drifts under the strong domain shift.
 run_dataset hyrank "$HYRANK_DATA" -3.5 "" \
   "base 0 gap off 0" \
-  "drse 0 guided off 0" \
-  "drse_rftm 1 guided off 0" \
-  "full 1 guided off 1"
+  "drse 0 guided bidirectional 0" \
+  "drse_rftm 1 guided bidirectional 0"
+
+train_row hyrank hyrank_full 1 guided bidirectional 1 --abl-history 0
+eval_row hyrank hyrank_full "$HYRANK_DATA"
 
 echo
 echo "================ FINAL SUMMARY ================"

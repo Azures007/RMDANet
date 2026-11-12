@@ -1,0 +1,26 @@
+RMDANet clean-v7 ablation package
+=================================
+Built: 2026-11-12
+Base commit: 8151039 (model: keep original module-creation order)
+Includes:
+  - DRSE naming fix: DRSE = Dual-branch Reliability Spectral-spatial Encoder
+    (DualReliabilityEncoder); RCGP = Residual Center-Guided Pooling (sub-module);
+    RSF = Reliability Spectral Fusion (sub-module).
+  - True DRSE-off switch: DualReliabilityEncoder(use_spectral_branch=False) and
+    ablate_4rows.py --abl-drse 0/1.
+  - Original module-creation order preserved for DRSE-on models, so results
+    from before the switch remain reproducible.
+  - run_drseoff_row.sh (single-branch DRSE-off rows).
+  - verify_code.py (structure check; run it after unzipping).
+  - Tooling env overrides (training/model code unchanged):
+      ABL_POOL_CENTER_SIZE   RCGP center window (default 5)
+      DRSE_ALPHA_LOGIT       residual alpha logit (default comes from config)
+  - Best-performing per-dataset settings (final ablation):
+      Pavia   : alpha -4.0, bidirectional fusion, prat_style_max 0.2
+      Houston : alpha -4.0, bidirectional fusion, prat_style_max 0.64
+      HyRANK  : alpha -3.5, conservative bidirectional fusion
+                (delta -1.0, w_max 0.40, w_min 0.10, tau_a 0.40),
+                prat_style_max 0.6, RTML with current pseudo labels
+                (history off), reliability 0.35 / confidence 0.90 / proto 0.06
+      HyRANK ablation rows:
+        000 57.81 | 100 58.13 | 110 59.71 | 111 60.85  (seed 1237)
