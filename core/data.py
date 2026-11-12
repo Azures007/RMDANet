@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -174,6 +175,113 @@ def align_target_bands(
     return np.asarray(aligned, dtype=np.float32), diagnostics
 
 
+def denoise_scene(image: np.ndarray, method: str | None = None, param: float | None = None) -> np.ndarray:
+    """Optional HSI denoising / spectral enhancement (preprocessing ablation).
+
+    Controlled by environment variables so that training and the locked final
+    evaluation can be run with identical preprocessing without changing CLI:
+
+        HSI_DENOISE       one of none|gauss|median|savgol|pca|mnf|wavelet|nlm|bilateral|tv|deriv
+        HSI_DENOISE_PARAM numeric parameter for the chosen method
+
+    The transform is applied identically to the source and target scenes; labels
+    are never touched.  Default ("none") keeps all previously reported results
+    bit-identical.
+    """
+    method = (method if method is not None else os.environ.get("HSI_DENOISE", "none")).lower()
+    if param is None:
+        param = float(os.environ.get("HSI_DENOISE_PARAM", "1.0"))
+    if method in ("", "none"):
+        return image
+    img = np.asarray(image, dtype=np.float32)
+
+    if method == "gauss":
+        from scipy.ndimage import gaussian_filter
+        sigma = float(param) if param > 0 else 1.0
+        return np.stack([gaussian_filter(img[..., b], sigma=sigma)
+                         for b in range(img.shape[-1])], axis=-1).astype(np.float32)
+
+    if method == "median":
+        from scipy.ndimage import median_filter
+        size = int(param) if param >= 3 else 3
+        size = size if size % 2 == 1 else size + 1
+        return np.stack([median_filter(img[..., b], size=size)
+                         for b in range(img.shape[-1])], axis=-1).astype(np.float32)
+
+    if method == "savgol":
+        from scipy.signal import savgol_filter
+        win = int(param) if param >= 3 else 5
+        win = win if win % 2 == 1 else win + 1
+        win = min(win, (img.shape[-1] // 2) * 2 - 1)
+        return savgol_filter(img, win, 2, axis=-1).astype(np.float32)
+
+    if method == "pca":
+        from sklearn.decomposition import PCA
+        h, w, b = img.shape
+        k = int(param) if param >= 2 else max(2, int(b * 0.95))
+        k = min(k, b)
+        flat = img.reshape(-1, b)
+        pca = PCA(n_components=k, random_state=0).fit(flat)
+        return pca.inverse_transform(pca.transform(flat)).reshape(h, w, b).astype(np.float32)
+
+    if method == "mnf":
+        from scipy.linalg import eigh
+        h, w, b = img.shape
+        flat = img.reshape(-1, b)
+        cov_x = np.cov(flat.T) + 1e-6 * np.eye(b)
+        noise = flat - np.median(flat, axis=0, keepdims=True)
+        cov_n = np.cov(noise.T) + 1e-6 * np.eye(b)
+        vals, vecs = eigh(cov_x, cov_n)
+        order = np.argsort(vals)[::-1]
+        k = int(param) if param >= 2 else 30
+        k = min(k, b)
+        w_mat = vecs[:, order[:k]]
+        return (flat @ w_mat @ w_mat.T).reshape(h, w, b).astype(np.float32)
+
+    if method == "wavelet":
+        import pywt
+        from skimage.restoration import denoise_wavelet
+        return np.stack([denoise_wavelet(img[..., b], method="BayesShrink", mode="soft",
+                                         wavelet=pywt.Wavelet("db4"), rescale_sigma=True)
+                         for b in range(img.shape[-1])], axis=-1).astype(np.float32)
+
+    if method == "nlm":
+        import cv2
+        h_param = int(param) if param >= 1 else 5
+        out = np.empty_like(img)
+        for b in range(img.shape[-1]):
+            band = img[..., b]
+            lo, hi = float(band.min()), float(band.max())
+            scale = max(hi - lo, 1e-6)
+            u8 = np.clip((band - lo) / scale * 255.0, 0, 255).astype(np.uint8)
+            den = cv2.fastNlMeansDenoising(u8, None, h_param, 7, 21)
+            out[..., b] = den.astype(np.float32) / 255.0 * scale + lo
+        return out
+
+    if method == "bilateral":
+        import cv2
+        d = int(param) if param >= 3 else 5
+        out = np.empty_like(img)
+        for b in range(img.shape[-1]):
+            band = img[..., b]
+            lo, hi = float(band.min()), float(band.max())
+            scale = max(hi - lo, 1e-6)
+            band = ((band - lo) / scale).astype(np.float32)
+            out[..., b] = cv2.bilateralFilter(band, d, 0.1, 5.0)
+        return out.astype(np.float32)
+
+    if method == "tv":
+        from skimage.restoration import denoise_tv_chambolle
+        weight = float(param) if param > 0 else 0.05
+        return np.stack([denoise_tv_chambolle(img[..., b], weight=weight)
+                         for b in range(img.shape[-1])], axis=-1).astype(np.float32)
+
+    if method == "deriv":
+        return np.diff(img, axis=-1).astype(np.float32)
+
+    raise ValueError(f"Unknown HSI_DENOISE method: {method}")
+
+
 def load_source_scene(data_path: str | Path, name: str = "Houston13", num_classes: int = 7, normalize_mode: str = "l2") -> SceneData:
     root = Path(data_path)
     # WHU-Hi dataset support
@@ -182,7 +290,7 @@ def load_source_scene(data_path: str | Path, name: str = "Houston13", num_classe
         ground_truth = load_whu_gt(str(root), name, num_classes)
         image = robust_scene_normalize(image, mode=normalize_mode)
         return SceneData(image=image, ground_truth=ground_truth, class_names=[f"Class{i}" for i in range(1, num_classes+1)])
-    image = _read_mat_image(root / f"{name}.mat")
+    image = denoise_scene(_read_mat_image(root / f"{name}.mat"))
     ground_truth = _read_mat_ground_truth(root / f"{name}_{num_classes}gt.mat")
     if image.shape[:2] != ground_truth.shape:
         raise ValueError(
@@ -199,7 +307,8 @@ def load_target_image_only(data_path: str | Path, name: str = "Houston18", norma
         image = load_whu_image(str(root), name)
         image = robust_scene_normalize(image, mode=normalize_mode)
         return SceneData(image=image, ground_truth=None, class_names=[])
-    image = robust_scene_normalize(_read_mat_image(root / f"{name}.mat"), mode=normalize_mode)
+    image = denoise_scene(_read_mat_image(root / f"{name}.mat"))
+    image = robust_scene_normalize(image, mode=normalize_mode)
     return SceneData(image=image, ground_truth=None, class_names=HOUSTON_CLASS_NAMES.copy())
 
 
