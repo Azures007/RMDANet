@@ -9,7 +9,7 @@ seed = 1237、data_seed = 1237、单卡 RTX 4090、torch 2.8.0+cu128。
 ```
 输入 patch
  ├─ LocalSpectralSpatialEncoder → semantic2d → ScaleSelectiveMicroASPP(adaptive)
- ├─ DRSE = 残差中心引导池化 + 双向可靠性光谱融合
+ ├─ DRSE = 双分支可靠性光谱-空间编码器（空间分支含 RCGP 残差中心引导池化；融合子模块 RSF）
  │    · pooled = gap + α·(guided − gap)，α = sigmoid(可学习 logit)
  │    · F = Norm((1−w)·F_ctx + w·F_spec)，w = 0.5 + a·(base−0.5)
  │    · base = σ(γ(r_s−r_c)/T_w + δ)，a = σ((cos(F_ctx,F_spec)−τ_a)/T_a)
@@ -28,11 +28,16 @@ seed = 1237、data_seed = 1237、单卡 RTX 4090、torch 2.8.0+cu128。
 | 融合模式 | bidirectional | bidirectional | bidirectional（保守参数） |
 | `prat_style_max` | 0.64 | 0.2 | 0.4 |
 
+> 术语：**DRSE** = 双分支可靠性光谱-空间编码器（`DualReliabilityEncoder`）；
+> **RCGP** = 残差中心引导池化（DRSE 空间分支子模块）；**RSF** = 可靠性光谱融合（DRSE 融合子模块）。
+> 下表中 `+DRSE` 行 = RCGP + RSF 同时打开；真正的 DRSE-off（单分支）行由
+> `run_drseoff_row.sh` 补跑，结果待填入。
+
 ## 结果（seed 1237）
 
 ### Houston13 → Houston18（双向融合）
 
-| Method | RFTM | DRSE | RTML | OA | AA | Kappa |
+| Method | RFTM | RCGP+RSF（DRSE 子模块） | RTML | OA | AA | Kappa |
 |---|---|---|---|---|---|---|
 | Baseline | ✗ | ✗ | ✗ | 74.77 | 77.35 | 0.6208 |
 | +DRSE | ✗ | ✓ | ✗ | 76.12 | 78.97 | 0.6392 |
@@ -66,7 +71,7 @@ seed = 1237、data_seed = 1237、单卡 RTX 4090、torch 2.8.0+cu128。
 
 | 模块 | Houston | Pavia | HyRANK |
 |---|---|---|---|
-| DRSE（残差池化 + 双向融合） | +1.35 | +2.30 | 待定（融合 off +0.78） |
+| DRSE（RCGP + RSF） | +1.35 | +2.30 | 待定（融合 off +0.78） |
 | RFTM | +2.36 | +15.53 | 待定（融合 off +0.68） |
 | RTML | +0.58 | +2.28 | 待定（融合 off +1.69） |
 

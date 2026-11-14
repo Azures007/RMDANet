@@ -39,6 +39,7 @@ class HSICNN(nn.Module):
 
     def __init__(self, bands: int, num_classes: int, feature_dim: int = 128, dropout: float = 0.1):
         super().__init__()
+        self.num_classes = int(num_classes)
         self.features = nn.Sequential(
             nn.Conv2d(bands, 64, 3, padding=1, bias=False),
             nn.BatchNorm2d(64),
@@ -60,11 +61,15 @@ class HSICNN(nn.Module):
         conv = self.features(x).flatten(1)
         feat = self.projection(conv)
         logits = self.classifier(self.dropout(feat))
+        # Single-branch baseline: all three heads return the same logits and the
+        # (unused) spectral branch reports full reliability, so the shared
+        # evaluator's conservative posterior fusion reduces to argmax(logits).
         return SimpleNamespace(
             logits=logits,
             features=feat,
             context_logits=logits,
             spectral_logits=logits,
+            spectral_reliability=torch.ones(x.size(0), device=x.device),
         )
 
 
@@ -97,8 +102,9 @@ def _extract_patch(image: np.ndarray, r: int, c: int, size: int) -> np.ndarray:
     return patch.transpose(2, 0, 1)
 
 
-def build_arrays(args: argparse.Namespace, seed: int, source_per_class: int, target_pool: int):
-    norm_mode = "median" if getattr(args, "amplitude_channel", False) else "l2"
+def build_arrays(args: argparse.Namespace, seed: int, source_per_class: int, target_pool: int,
+                 normalize_mode: str = "l2"):
+    norm_mode = normalize_mode
     src = hsidata.load_source_scene(args.data_path, args.source_name, args.num_classes,
                                    normalize_mode=norm_mode)
     tgt = hsidata.load_target_image_only(args.data_path, args.target_name, normalize_mode=norm_mode)
@@ -151,6 +157,7 @@ def train_baseline(
     lr: float | None = None,
     source_per_class: int = 180,
     out_root: str = "results_benchmark",
+    normalize_mode: str = "l2",
     extra: dict | None = None,
 ) -> dict:
     args = protocol_args(dataset)
@@ -161,7 +168,8 @@ def train_baseline(
     base_trainer.set_seed(seed, True)
 
     src, aligned, sx, sy, tx = build_arrays(args, seed, source_per_class,
-                                            int(args.target_train_max_samples))
+                                            int(args.target_train_max_samples),
+                                            normalize_mode=normalize_mode)
     model = HSICNN(src.image.shape[-1], args.num_classes).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=args.weight_decay)
     total_steps = int(epochs * steps_per_epoch)
@@ -179,7 +187,7 @@ def train_baseline(
         out_s = model(sx[si])
         out_t = model(tx[ti])
         loss = F.cross_entropy(out_s.logits, sy[si])
-        loss = loss + adapt(out_s, out_t, step / max(1, total_steps - 1))
+        loss = loss + adapt(out_s, out_t, step / max(1, total_steps - 1), ys=sy[si])
         loss.backward()
         if hasattr(adapt, "post_step"):
             adapt.post_step()
@@ -213,11 +221,13 @@ def train_baseline(
 # method adapters
 # --------------------------------------------------------------------------- #
 class _Zero(nn.Module):
-    def forward(self, out_s, out_t, p):
+    def forward(self, out_s, out_t, p, ys=None):
         return out_s.logits.new_zeros(())
 
 
 def _make_adapter(method, model, device, extra):
+    if method == "source":
+        return _Zero()
     if method == "dan":
         from losses import DANLoss
         return DANLoss(weight=float(extra.get("mmd_weight", 1.0)))
@@ -228,4 +238,31 @@ def _make_adapter(method, model, device, extra):
     if method == "jan":
         from losses import JANLoss
         return JANLoss(weight=float(extra.get("jmmd_weight", 1.0)))
+    if method == "mtlda":
+        from losses import MTLDALoss
+        return MTLDALoss(model.feature_dim, device,
+                         domain_weight=float(extra.get("domain_weight", 0.5)),
+                         entropy_weight=float(extra.get("entropy_weight", 0.05)))
+    if method == "cacl":
+        from losses import CACLLoss
+        return CACLLoss(contrast_weight=float(extra.get("contrast_weight", 0.5)),
+                        pseudo_weight=float(extra.get("pseudo_weight", 0.3)),
+                        confidence=float(extra.get("confidence", 0.9)))
+    if method == "uipcl":
+        from losses import UIPCLLoss
+        return UIPCLLoss(model.num_classes,
+                         prototype_weight=float(extra.get("prototype_weight", 0.5)),
+                         pseudo_weight=float(extra.get("pseudo_weight", 0.5)))
+    if method == "pcdm":
+        from losses import PCDMLoss
+        return PCDMLoss(model.num_classes,
+                        prior_weight=float(extra.get("prior_weight", 0.5)),
+                        contrast_weight=float(extra.get("contrast_weight", 0.3)),
+                        confidence=float(extra.get("confidence", 0.9)))
+    if method == "vcmoe":
+        from losses import VCMoELoss
+        return VCMoELoss(model.feature_dim, device,
+                         adv_weight=float(extra.get("adv_weight", 0.3)),
+                         contrast_weight=float(extra.get("contrast_weight", 0.3)),
+                         diversity_weight=float(extra.get("diversity_weight", 0.1)))
     raise ValueError(f"unknown baseline method: {method}")

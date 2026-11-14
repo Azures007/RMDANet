@@ -44,12 +44,17 @@ def main():
     aligned,_=align_target_bands(src.image,target.image,strength=t.band_alignment_strength,
                                   renormalize=mode!='median')
     # Match the checkpoint structure: older checkpoints (pre-residual) have no
-    # `_alpha_logit`, newer (residual DRSE) ones do.
+    # `_alpha_logit`, newer (residual RCGP) ones do.  Single-branch checkpoints
+    # (DRSE disabled) have no spectral branch / fusion keys.
     has_residual_alpha = any(str(k).endswith("_alpha_logit") for k in checkpoint["model"].keys())
+    has_spectral_branch = any(
+        str(k).startswith(("spectral_encoder.", "spectral_fusion.")) for k in checkpoint["model"].keys()
+    )
     model=DualReliabilityEncoder(bands=src.image.shape[-1],num_classes=t.num_classes,
        projection_dim=t.projection_dim,projection_norm=t.projection_norm,
        aspp_mode=t.aspp_mode,pooling_mode=t.pooling_mode,
        spectral_fusion_mode=t.spectral_fusion_mode,amplitude_channel=t.amplitude_channel,
+       use_spectral_branch=has_spectral_branch,
        enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0),
        pool_center_size=getattr(t,"pool_center_size",5),
        pool_temperature=getattr(t,"pool_temperature",0.30),

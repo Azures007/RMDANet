@@ -108,7 +108,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--eval_batch_size", type=int, default=192)
     parser.add_argument("--projection_dim", type=int, default=128)
     parser.add_argument("--projection_norm", choices=["layer", "batch"], default="batch")
-    # --- DRSE: residual center-guided pooling (baked into core/model.py) ---
+    # --- DRSE (Dual-branch Reliability Spectral-spatial Encoder) ---
+    # ``--no-use_spectral_branch`` removes the spectral branch + reliability fusion,
+    # i.e. it turns DRSE off as a whole (single-branch baseline).
+    parser.add_argument("--use_spectral_branch", action=argparse.BooleanOptionalAction, default=True)
+    # --- RCGP (Residual Center-Guided Pooling), a sub-module of DRSE's spatial branch ---
     parser.add_argument("--pool_center_size", type=int, default=5)
     parser.add_argument("--pool_temperature", type=float, default=0.30)
     parser.add_argument("--pool_gate_init", type=str, default="0.6,0.3,0.1",
@@ -795,11 +799,18 @@ def reliable_output_probability(output: ModelOutput) -> torch.Tensor:
     """
     main = F.softmax(output.logits.float(), dim=1).clamp_min(1e-8)
     context = F.softmax(output.context_logits.float(), dim=1).clamp_min(1e-8)
-    spectral = F.softmax(output.spectral_logits.float(), dim=1).clamp_min(1e-8)
     main_label = main.argmax(dim=1)
     context_agreement = main_label.eq(context.argmax(dim=1)).float()
-    spectral_agreement = main_label.eq(spectral.argmax(dim=1)).float()
     context_weight = 0.12 * context_agreement
+    if output.spectral_logits is None:
+        # DRSE disabled (single-branch): no spectral head to fuse.
+        probability = (
+            (1.0 - context_weight[:, None]) * main
+            + context_weight[:, None] * context
+        )
+        return probability / probability.sum(dim=1, keepdim=True).clamp_min(1e-8)
+    spectral = F.softmax(output.spectral_logits.float(), dim=1).clamp_min(1e-8)
+    spectral_agreement = main_label.eq(spectral.argmax(dim=1)).float()
     spectral_weight = (
         0.035
         * context_agreement
@@ -1205,7 +1216,7 @@ def run_epoch(
                     label_smoothing=args.label_smoothing,
                 ) if args.use_prat else source_loss.new_tensor(0.0)
             )
-            if args.use_spectral_aux:
+            if args.use_spectral_aux and source_output.spectral_logits is not None:
                 spectral_terms = [
                     F.cross_entropy(source_output.context_logits, source_y, weight=class_weights),
                     F.cross_entropy(source_output.spectral_logits, source_y, weight=class_weights),
@@ -1530,6 +1541,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         pooling_mode=args.pooling_mode,
         spectral_fusion_mode=args.spectral_fusion_mode,
         amplitude_channel=args.amplitude_channel,
+        use_spectral_branch=getattr(args, "use_spectral_branch", True),
         enable_dual_head=(args.dual_head_filter or args.lambda_dual_source > 0),
         pool_center_size=args.pool_center_size,
         pool_temperature=args.pool_temperature,
