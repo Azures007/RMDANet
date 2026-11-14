@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import torch
@@ -48,6 +49,165 @@ class LocalSpectralSpatialEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         features = self.stage2(self.stage1(self.stem(x.unsqueeze(1))))
         return F.silu(features + self.residual(features), inplace=True)
+
+
+# ---------------------------------------------------------------------------
+# Mamba (selective state-space) backbone variants for the HSI patch encoder.
+#
+# The whole family is selected at runtime via the HSI_BACKBONE environment
+# variable, so the released golden configuration continues to use the original
+# 3-D convolutional encoder unless explicitly requested.
+#
+#   HSI_BACKBONE=conv3d       (default) original LocalSpectralSpatialEncoder
+#   HSI_BACKBONE=mamba        per-pixel spectra -> spatial token Mamba (v1)
+#   HSI_BACKBONE=mamba_spectral  spatial pixels -> spectral sequence Mamba (v2)
+# ---------------------------------------------------------------------------
+_BACKBONE = os.environ.get("HSI_BACKBONE", "conv3d").lower()
+
+
+def _selective_scan(u, delta, A, B, C, D):
+    """Minimal pure-PyTorch selective scan (S6).
+
+    u:      (B, L, d_inner)
+    delta:  (B, L, d_inner)
+    A:      (d_inner, d_state)
+    B:      (B, L, d_state)
+    C:      (B, L, d_state)
+    D:      (d_inner,)
+    returns y: (B, L, d_inner)
+    """
+    batch, length, d_inner = u.shape
+    d_state = A.shape[1]
+    h = u.new_zeros((batch, d_inner, d_state))
+    ys = []
+    for t in range(length):
+        dt = delta[:, t, :]                       # (B, d_inner)
+        dA = torch.exp(dt.unsqueeze(-1) * A.unsqueeze(0))   # (B, d_inner, d_state)
+        dB = dt.unsqueeze(-1) * B[:, t, None, :]            # (B, d_inner, d_state)
+        h = dA * h + dB * u[:, t, :, None]
+        y = torch.einsum("bds,bs->bd", h, C[:, t, :]) + D * u[:, t, :]
+        ys.append(y)
+    return torch.stack(ys, dim=1)
+
+
+class MambaBlock(nn.Module):
+    """A single Mamba (S6) block operating on a token sequence."""
+
+    def __init__(self, d_model: int, d_state: int = 16, d_conv: int = 4, expand: int = 2):
+        super().__init__()
+        self.d_model = d_model
+        self.d_state = d_state
+        self.d_inner = int(expand * d_model)
+        self.dt_rank = max(1, d_model // 16)
+        self.in_proj = nn.Linear(d_model, 2 * self.d_inner, bias=False)
+        self.conv1d = nn.Conv1d(
+            self.d_inner, self.d_inner, kernel_size=d_conv,
+            groups=self.d_inner, padding=d_conv - 1, bias=True,
+        )
+        self.x_proj = nn.Linear(self.d_inner, self.dt_rank + 2 * d_state, bias=False)
+        self.dt_proj = nn.Linear(self.dt_rank, self.d_inner, bias=True)
+        A = torch.arange(1, d_state + 1, dtype=torch.float32).repeat(self.d_inner, 1)
+        self.A_log = nn.Parameter(torch.log(A))
+        self.D = nn.Parameter(torch.ones(self.d_inner))
+        self.out_proj = nn.Linear(self.d_inner, d_model, bias=False)
+        nn.init.kaiming_uniform_(self.in_proj.weight, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.out_proj.weight, a=math.sqrt(5))
+        with torch.no_grad():
+            nn.init.uniform_(self.dt_proj.bias, -2.0, 0.0)
+            nn.init.uniform_(self.dt_proj.weight, -0.05, 0.05)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:  # (B, L, d_model)
+        batch, length, _ = x.shape
+        xz = self.in_proj(x)
+        u, z = xz.chunk(2, dim=-1)                         # (B, L, d_inner)
+        u = u.transpose(1, 2)                              # (B, d_inner, L)
+        u = self.conv1d(u)[..., :length]
+        u = F.silu(u).transpose(1, 2)                      # (B, L, d_inner)
+
+        x_dbl = self.x_proj(u)                             # (B, L, dt_rank + 2*d_state)
+        dt, B, C = torch.split(x_dbl, [self.dt_rank, self.d_state, self.d_state], dim=-1)
+        dt = F.linear(dt, self.dt_proj.weight)
+        dt = F.softplus(dt + self.dt_proj.bias)
+        A = -torch.exp(self.A_log.float())
+        y = _selective_scan(u, dt, A, B, C, self.D)
+        y = y * F.silu(z)
+        return self.out_proj(y)
+
+
+class _TokenPositionalEncoding(nn.Module):
+    def __init__(self, num_tokens: int, d_model: int):
+        super().__init__()
+        self.pos = nn.Parameter(torch.zeros(1, num_tokens, d_model))
+        nn.init.trunc_normal_(self.pos, std=0.02)
+
+
+class MambaLocalEncoder(nn.Module):
+    """Mamba v1: per-pixel spectra are embedded and mixed as spatial tokens.
+
+    Input:  (B, bands, H, W)  (H = W = patch size)
+    Output: (B, 64, 1, H, W)  -- same interface as LocalSpectralSpatialEncoder.
+    """
+
+    def __init__(self, bands: int, d_model: int = 64, depth: int = 4, d_state: int = 16):
+        super().__init__()
+        self.in_proj = nn.Sequential(
+            nn.LayerNorm(bands),
+            nn.Linear(bands, d_model),
+        )
+        self.pos = _TokenPositionalEncoding(7 * 7, d_model)
+        self.blocks = nn.ModuleList([MambaBlock(d_model, d_state=d_state) for _ in range(depth)])
+        self.norm = nn.LayerNorm(d_model)
+        self.out_proj = nn.Sequential(
+            nn.Conv2d(d_model, 64, kernel_size=1, bias=False),
+            nn.GroupNorm(_groups(64), 64),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, bands, height, width = x.shape
+        tokens = x.permute(0, 2, 3, 1).reshape(batch, height * width, bands)
+        tokens = self.in_proj(tokens)                       # (B, HW, d_model)
+        tokens = tokens + self.pos.pos[:, : height * width]
+        for block in self.blocks:
+            tokens = tokens + block(tokens)
+        tokens = self.norm(tokens)
+        feature_map = tokens.transpose(1, 2).reshape(batch, -1, height, width)
+        feature_map = self.out_proj(feature_map)
+        return feature_map.unsqueeze(2)                     # (B, 64, 1, H, W)
+
+
+class MambaSpectralEncoder(nn.Module):
+    """Mamba v2: each pixel is a token, the spectral axis is the SSM sequence.
+
+    Input:  (B, bands, H, W)
+    Output: (B, 64, 1, H, W)
+    """
+
+    def __init__(self, bands: int, d_model: int = 64, depth: int = 3, d_state: int = 16):
+        super().__init__()
+        self.band_proj = nn.Linear(1, d_model)
+        self.pos = _TokenPositionalEncoding(bands, d_model)
+        self.blocks = nn.ModuleList([MambaBlock(d_model, d_state=d_state) for _ in range(depth)])
+        self.norm = nn.LayerNorm(d_model)
+        self.spatial_proj = nn.Sequential(
+            nn.Conv2d(d_model, 64, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(_groups(64), 64),
+            nn.SiLU(inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, bands, height, width = x.shape
+        # (B, H, W, bands) -> batch the pixels, sequence = bands
+        tokens = x.permute(0, 2, 3, 1).reshape(batch * height * width, bands, 1)
+        tokens = self.band_proj(tokens)                     # (B*HW, bands, d_model)
+        tokens = tokens + self.pos.pos[:, :bands]
+        for block in self.blocks:
+            tokens = tokens + block(tokens)
+        tokens = self.norm(tokens)
+        feature = tokens.mean(dim=1).reshape(batch, height, width, -1)  # (B,H,W,d_model)
+        feature = feature.permute(0, 3, 1, 2)
+        feature = self.spatial_proj(feature)
+        return feature.unsqueeze(2)
+
 
 
 class ResidualBlock2D(nn.Module):
@@ -470,7 +630,12 @@ class DualReliabilityEncoder(nn.Module):
         self.pooling_mode = pooling_mode
         self.spectral_fusion_mode = spectral_fusion_mode
         self.pool_gate_init = tuple(gate_init_value for gate_init_value in pool_gate_init)
-        self.local3d = LocalSpectralSpatialEncoder()
+        if _BACKBONE == "mamba":
+            self.local3d = MambaLocalEncoder(bands)
+        elif _BACKBONE == "mamba_spectral":
+            self.local3d = MambaSpectralEncoder(bands)
+        else:
+            self.local3d = LocalSpectralSpatialEncoder()
         self.semantic2d = nn.Sequential(
             ResidualBlock2D(64, 96, dropout=0.06),
             ResidualBlock2D(96, 128, dropout=0.08),
