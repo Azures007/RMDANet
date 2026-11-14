@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
+
+# Component-level ablation for the unified reliability score (tooling only).
+# RTML_ABL="time,drift" removes those components from the geometric mean (and
+# disables their selection/veto effects); default empty keeps golden behaviour.
+_RTML_DROP = {
+    part.strip().lower()
+    for part in os.environ.get("RTML_ABL", "").split(",")
+    if part.strip()
+}
 
 
 @dataclass
@@ -84,12 +94,14 @@ class ReliabilityPrototypeMemory:
         self.min_age = int(min_age)
         self.min_streak = int(min_streak)
         self.use_probability_history = bool(use_probability_history)
-        self.use_time_score = bool(use_time_score)
-        self.use_feature_score = bool(use_feature_score)
-        self.use_view_score = bool(use_view_score)
-        self.use_guard = bool(use_guard)
-        self.use_prototype_veto = bool(use_prototype_veto)
-        self.use_spatial = bool(use_spatial)
+        self.use_time_score = bool(use_time_score) and "time" not in _RTML_DROP
+        self.use_feature_score = bool(use_feature_score) and "drift" not in _RTML_DROP
+        self.use_view_score = bool(use_view_score) and "view" not in _RTML_DROP
+        self.use_guard = bool(use_guard) and "guard" not in _RTML_DROP
+        self.use_prototype_veto = bool(use_prototype_veto) and "proto" not in _RTML_DROP
+        self.use_spatial = bool(use_spatial) and "spatial" not in _RTML_DROP
+        self._use_conf = "conf" not in _RTML_DROP
+        self._use_margin = "margin" not in _RTML_DROP
         self.use_target_prototypes = bool(use_target_prototypes)
         self.reliability_weighted_prototype_update = bool(
             reliability_weighted_prototype_update
@@ -563,8 +575,14 @@ class ReliabilityPrototypeMemory:
             prototype_agreement = torch.ones_like(agreement)
 
         thresholds = self.class_thresholds()[labels]
-        confidence_score = torch.sigmoid((confidence - thresholds) / 0.035)
-        margin_score = torch.sigmoid((margin - self.pseudo_margin) / 0.030)
+        confidence_score = (
+            torch.sigmoid((confidence - thresholds) / 0.035)
+            if self._use_conf else torch.ones_like(confidence)
+        )
+        margin_score = (
+            torch.sigmoid((margin - self.pseudo_margin) / 0.030)
+            if self._use_margin else torch.ones_like(margin)
+        )
         age_score = (self.age[sample_ids].float() / 7.0).clamp(0.0, 1.0)
         streak_score = (self.streak[sample_ids].float() / 6.0).clamp(0.0, 1.0)
         time_score = torch.sqrt((age_score * streak_score).clamp_min(1e-8))
@@ -576,7 +594,11 @@ class ReliabilityPrototypeMemory:
             0.20 + 0.80 * spatial_score * spatial_agreement.float(),
             torch.ones_like(spatial_score),
         )
-        components = [confidence_score, margin_score]
+        components = []
+        if self._use_conf:
+            components.append(confidence_score)
+        if self._use_margin:
+            components.append(margin_score)
         if self.use_time_score:
             components.append(time_score)
         if self.use_feature_score:
@@ -589,6 +611,8 @@ class ReliabilityPrototypeMemory:
             components.append(prototype_score)
         if self.use_spatial:
             components.append(spatial_component)
+        if not components:
+            components = [torch.ones_like(confidence)]
         product = torch.ones_like(confidence_score)
         for component in components:
             product = product * component
@@ -605,11 +629,11 @@ class ReliabilityPrototypeMemory:
             | (spatial_agreement & spatial_score.ge(0.42))
             | exceptional
         )
-        stable = (
-            (reliability >= self.reliability_threshold)
-            & (confidence >= thresholds)
-            & (margin >= self.pseudo_margin)
-        )
+        stable = reliability >= self.reliability_threshold
+        if self._use_conf:
+            stable = stable & (confidence >= thresholds)
+        if self._use_margin:
+            stable = stable & (margin >= self.pseudo_margin)
         if self.use_time_score:
             stable = stable & (self.age[sample_ids] >= self.min_age) & (self.streak[sample_ids] >= self.min_streak)
         if self.use_view_score:
