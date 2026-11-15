@@ -50,6 +50,72 @@ class LocalSpectralSpatialEncoder(nn.Module):
         return F.silu(features + self.residual(features), inplace=True)
 
 
+class TransformerTokenEncoder(nn.Module):
+    """S2: spectral-token Transformer encoder for 7x7 patches.
+
+    Each pixel spectrum is embedded as one token (49 tokens per patch); a
+    depthwise 3D convolution injects local spectral-spatial context before
+    tokenization, and pre-norm Transformer blocks mix the spatial tokens.
+    The output keeps the (B, 64, 1, H, W) interface expected by semantic2d.
+    """
+
+    OUT_CHANNELS = 64
+
+    def __init__(
+        self,
+        bands: int,
+        dim: int = 64,
+        depth: int = 4,
+        heads: int = 4,
+        mlp_ratio: int = 2,
+        dropout: float = 0.10,
+    ) -> None:
+        super().__init__()
+        self.bands = int(bands)
+        self.dim = int(dim)
+        self.local_context = nn.Conv3d(
+            self.bands,
+            self.bands,
+            kernel_size=3,
+            padding=1,
+            groups=self.bands,
+            bias=False,
+        )
+        self.token_proj = nn.Sequential(
+            nn.LayerNorm(self.bands),
+            nn.Linear(self.bands, self.dim),
+        )
+        self.pos = nn.Parameter(torch.zeros(1, 49, self.dim))
+        nn.init.trunc_normal_(self.pos, std=0.02)
+        layer = nn.TransformerEncoderLayer(
+            d_model=self.dim,
+            nhead=heads,
+            dim_feedforward=int(self.dim * mlp_ratio),
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+        )
+        self.blocks = nn.TransformerEncoder(layer, num_layers=depth)
+        self.norm = nn.LayerNorm(self.dim)
+        self.out_proj = nn.Sequential(
+            nn.Conv2d(self.dim, 64, kernel_size=1, bias=False),
+            nn.GroupNorm(_groups(64), 64),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        batch, bands, height, width = x.shape
+        context = F.silu(self.local_context(x.unsqueeze(1)), inplace=True).squeeze(1)
+        x = x + context
+        tokens = x.permute(0, 2, 3, 1).reshape(batch, height * width, bands)
+        tokens = self.token_proj(tokens) + self.pos[:, : height * width]
+        tokens = self.blocks(tokens)
+        tokens = self.norm(tokens)
+        feature_map = tokens.transpose(1, 2).reshape(batch, self.dim, height, width)
+        feature_map = self.out_proj(feature_map)
+        return feature_map.unsqueeze(2)
+
+
 class ResidualBlock2D(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, dropout: float = 0.08) -> None:
         super().__init__()
@@ -467,7 +533,7 @@ class DualReliabilityEncoder(nn.Module):
         self.pooling_mode = pooling_mode
         self.spectral_fusion_mode = spectral_fusion_mode
         self.pool_gate_init = tuple(gate_init_value for gate_init_value in pool_gate_init)
-        self.local3d = LocalSpectralSpatialEncoder()
+        self.local3d = TransformerTokenEncoder(bands)
         self.semantic2d = nn.Sequential(
             ResidualBlock2D(64, 96, dropout=0.06),
             ResidualBlock2D(96, 128, dropout=0.08),
