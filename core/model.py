@@ -76,8 +76,8 @@ class TransformerTokenEncoder(nn.Module):
         self.local_context = nn.Conv3d(
             self.bands,
             self.bands,
-            kernel_size=3,
-            padding=1,
+            kernel_size=(3, 3, 3),
+            padding=(1, 1, 1),
             groups=self.bands,
             bias=False,
         )
@@ -105,7 +105,7 @@ class TransformerTokenEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         batch, bands, height, width = x.shape
-        context = F.silu(self.local_context(x.unsqueeze(1)), inplace=True).squeeze(1)
+        context = F.silu(self.local_context(x.unsqueeze(2)), inplace=True).squeeze(2)
         x = x + context
         tokens = x.permute(0, 2, 3, 1).reshape(batch, height * width, bands)
         tokens = self.token_proj(tokens) + self.pos[:, : height * width]
