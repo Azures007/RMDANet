@@ -31,23 +31,58 @@ class ConvNormAct3D(nn.Sequential):
         )
 
 
+class SEBlock3D(nn.Module):
+    """Channel squeeze-and-excitation for 3D feature maps."""
+
+    def __init__(self, channels: int, reduction: int = 8) -> None:
+        super().__init__()
+        hidden = max(8, channels // reduction)
+        self.fc1 = nn.Conv3d(channels, hidden, kernel_size=1, bias=True)
+        self.fc2 = nn.Conv3d(hidden, channels, kernel_size=1, bias=True)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        descriptor = F.adaptive_avg_pool3d(x, 1)
+        descriptor = F.silu(self.fc1(descriptor), inplace=True)
+        gate = torch.sigmoid(self.fc2(descriptor))
+        return x * gate
+
+
+class ResidualBlock3D(nn.Module):
+    """Pre-activation 3D residual block with channel SE attention."""
+
+    def __init__(self, channels: int, dropout: float = 0.0) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv3d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.norm1 = nn.GroupNorm(_groups(channels), channels)
+        self.conv2 = nn.Conv3d(channels, channels, kernel_size=3, padding=1, bias=False)
+        self.norm2 = nn.GroupNorm(_groups(channels), channels)
+        self.se = SEBlock3D(channels)
+        self.dropout = nn.Dropout3d(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+        x = F.silu(self.norm1(self.conv1(x)), inplace=True)
+        x = self.dropout(x)
+        x = self.norm2(self.conv2(x))
+        x = self.se(x)
+        return F.silu(x + residual, inplace=True)
+
+
 class LocalSpectralSpatialEncoder(nn.Module):
+    """Wider 3D spectral-spatial stem with SE attention (S1 backbone upgrade)."""
+
+    OUT_CHANNELS = 96
+
     def __init__(self) -> None:
         super().__init__()
-        self.stem = ConvNormAct3D(1, 24, (7, 3, 3), stride=(2, 1, 1), padding=(3, 1, 1))
-        self.stage1 = ConvNormAct3D(24, 40, (5, 3, 3), stride=(2, 1, 1), padding=(2, 1, 1))
-        self.stage2 = ConvNormAct3D(40, 64, (3, 3, 3), stride=(2, 1, 1), padding=(1, 1, 1))
-        self.residual = nn.Sequential(
-            nn.Conv3d(64, 64, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(_groups(64), 64),
-            nn.SiLU(inplace=True),
-            nn.Conv3d(64, 64, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(_groups(64), 64),
-        )
+        self.stem = ConvNormAct3D(1, 32, (7, 3, 3), stride=(2, 1, 1), padding=(3, 1, 1))
+        self.stage1 = ConvNormAct3D(32, 64, (5, 3, 3), stride=(2, 1, 1), padding=(2, 1, 1))
+        self.stage2 = ConvNormAct3D(64, 96, (3, 3, 3), stride=(2, 1, 1), padding=(1, 1, 1))
+        self.residual = ResidualBlock3D(96, dropout=0.05)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         features = self.stage2(self.stage1(self.stem(x.unsqueeze(1))))
-        return F.silu(features + self.residual(features), inplace=True)
+        return self.residual(features)
 
 
 class ResidualBlock2D(nn.Module):
@@ -469,7 +504,7 @@ class DualReliabilityEncoder(nn.Module):
         self.pool_gate_init = tuple(gate_init_value for gate_init_value in pool_gate_init)
         self.local3d = LocalSpectralSpatialEncoder()
         self.semantic2d = nn.Sequential(
-            ResidualBlock2D(64, 96, dropout=0.06),
+            ResidualBlock2D(self.local3d.OUT_CHANNELS, 96, dropout=0.06),
             ResidualBlock2D(96, 128, dropout=0.08),
             ResidualBlock2D(128, 128, dropout=0.08),
         )
