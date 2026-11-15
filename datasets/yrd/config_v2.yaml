@@ -1,0 +1,75 @@
+# YRD: yrd_nc12 -> yrd_nc13 (Yangtze River Delta, 7 classes)
+# Protocol aligned with Houston/Pavia: 180 labeled source samples per class,
+# no source validation split, 50 epochs x 40 steps, final epoch reported.
+# Data lives in /root/autodl-tmp/Datasets/YRD_extract/YRD
+# (yrd_nc12.mat, yrd_nc12_7gt.mat, yrd_nc13.mat, yrd_nc13_7gt.mat).
+dataset:
+  source_name: yrd_nc12
+  target_name: yrd_nc13
+  num_classes: 7
+
+training:
+  patch_size: 7
+  batch_size: 128
+  eval_batch_size: 512
+  eval_interval: 5
+  epochs: 50
+  lr: 0.001
+  weight_decay: 0.0004
+  grad_clip: 5.0
+  source_samples_per_class: 180
+  source_budget_train_fraction: 1.0
+  source_train_ratio: 0.38
+  steps_per_epoch: 40
+  source_sampler_power: 1.0
+  target_train_max_samples: 15000
+  target_sampling_grid: 30
+  target_sampling_stratified_fraction: 0.82
+  neighbor_radius: 3
+  max_neighbors: 12
+  band_alignment_strength: 0.1
+  ema_decay: 0.996
+  label_smoothing: 0.035
+  num_workers: 4
+  amp: true
+
+uda:
+  pool_center_size: 5
+  pool_temperature: 0.30
+  pool_gate_init: "0.6,0.3,0.1"
+  pool_residual: true
+  pool_alpha_logit: -4.0
+
+  ablation_id: full
+  align_maturity_gate: false
+  independent_target_reweight: false
+  select_final_epoch: true
+  anchor_freeze_epoch: 17
+  pseudo_start_epoch: 17
+  pseudo_warm_epochs: 10
+  lmmd_start_epoch: 25
+  lmmd_warm_epochs: 8
+  pseudo_confidence: 0.92
+  reliability_threshold: 0.40
+  pseudo_margin: 0.08
+  pseudo_min_per_class: 0
+  lambda_cca: 0.5
+  cca_start_epoch: 0
+  cca_temperature: 0.10
+  lambda_coral: 0.3
+  lambda_lmmd: 0.3
+  prototype_align_flag: true
+  prototype_weight: 0.03
+  prototype_confidence: 0.95
+  prototype_temperature: 0.08
+  include_target_scale_mi: true
+  strict_class_balance_strength: 1.0
+  use_early_target_adaptation: true
+  memory_update_start_epoch: 1
+  prat_style_max: 0.4
+  prat_warm_epochs: 23
+  cempa_class_cap: 24
+  cempa_min_age: 2
+  cempa_min_streak: 2
+  target_gt_mix_ratio: 0.0
+  use_gt_target_mask: false

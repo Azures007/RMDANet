@@ -154,7 +154,8 @@ def main():
         cfg = ROWS[a.row]
         run_name = a.row
 
-    a = trainer.load_config_into_args(a, str(ROOT / "datasets" / a.dataset / "config.yaml"))
+    cfg_name = getattr(a, "config", None) or "config.yaml"
+    a = trainer.load_config_into_args(a, str(ROOT / "datasets" / a.dataset / cfg_name))
     if a.dataset == "pavia":
         a.data_path = str(Path(PAVIA_DATA) / "Pavia")
     else:
