@@ -66,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num_classes", type=int, default=7, help="Number of classes (excluding background)")
     parser.add_argument("--gpu", type=int, default=0)
     parser.add_argument("--seed", type=int, default=1233)
+    parser.add_argument("--pretrained_backbone", type=str, default="")
     parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--num_workers", type=int, default=0)
@@ -1509,6 +1510,15 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         fusion_w_min=args.fusion_w_min,
         fusion_w_max=args.fusion_w_max,
     ).to(device)
+    pretrained_backbone = str(getattr(args, "pretrained_backbone", "") or "")
+    if pretrained_backbone:
+        state = torch.load(pretrained_backbone, map_location="cpu")
+        encoder_state = state.get("encoder", state) if isinstance(state, dict) else state
+        missing, unexpected = student.local3d.load_state_dict(encoder_state, strict=False)
+        print(
+            f"[pretrain] loaded {pretrained_backbone} | "
+            f"missing={len(missing)} unexpected={len(unexpected)}"
+        )
     teacher = copy.deepcopy(student).to(device)
     teacher.eval()
     guard_model: DualReliabilityEncoder | None = None
