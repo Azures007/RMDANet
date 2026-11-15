@@ -388,7 +388,7 @@ conf | margin | time | drift | view | guard | proto | spatial
 
 | 项 | 变化 |
 |---|---|
-| 总损失加权项 | 17 → **15**（默认生效 14 → **12**，另有 dual-head 默认关） |
+| 总损失加权项 | 17 → **14**（删除 dual-head CE 1 项 + feature/scale teacher 2 项） |
 | 教师一致性 | 只剩 **soft 蒸馏**（`teacher_consistency_losses` 已精简为只返回 soft） |
 | 删除提交 | 本地 `6810047`；服务器 vGPU `00ce8bf` |
 | 删除后基线（即 E5 数字） | Pavia **85.68 ± 0.44**、Houston **78.57 ± 0.74**、HyRANK **56.65 ± 0.60** |
@@ -403,7 +403,7 @@ conf | margin | time | drift | view | guard | proto | spatial
 | 外部 scale_pair / center_pair | **保留** | E1：Pavia −1.88 |
 | **feature_consistency + scale_teacher** | ✅ **已正式删除**（3 seed 验证） | E5 3 seed：Pavia +0.09、Houston −0.16、HyRANK −0.09（均在噪声内） |
 | 已删除的无用项 | ✅ 已删 | `lmmd_loss`（从未调用）、`lambda_mpa`、`lambda_confusion`（计算但未入总损失） |
-| Dual-head Source CE | 保留代码 | 默认关闭（`lambda_dual_source=0`） |
+| Dual-head Source CE | ✅ **已删除** | 默认未启用（`lambda_dual_source=0`），代码（classifier2/logits2/双头分支）已全部移除 |
 
 ### 新增 tag / 日志
 
@@ -428,7 +428,7 @@ conf | margin | time | drift | view | guard | proto | spatial
 | 删 **spectral_aux** | **69.88（−6.04）**/ 84.67（−1.38） | 78.65（−0.62）/ 79.01（−0.15） | 52.70（−3.30）/ 55.83（−1.92） | **保留**（两数据集崩） |
 | 删 **scale_mi** | 85.30（−0.62）/ **81.98（−4.07）** | 78.89（−0.38）/ 79.11（−0.05） | 55.41（−0.59）/ 57.59（−0.16） | **保留**（Pavia 明显降） |
 
-**结论：5 个候选在 2 个 seed 上均出现至少一个数据集明显下降（>0.3），全部保留。损失精简到此为止（15 个加权项，默认生效 14 项）。**
+**结论：5 个候选在 2 个 seed 上均出现至少一个数据集明显下降（>0.3），全部保留。损失精简到此为止：最终 14 个加权损失项（全部默认生效）。**
 
 Tag：`results_ablation_clean/{ds}/{ds}_{soft_consistency,coral,lmmd,spectral_aux,scale_mi}_2s_s{1237,1239}_seed{seed}`
 
