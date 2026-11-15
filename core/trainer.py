@@ -39,36 +39,6 @@ from v71_controls import (reliability_lmmd, maturity_snapshot, independent_spect
 
 
 
-def lmmd_loss(
-    source_features: torch.Tensor,
-    source_labels: torch.Tensor,
-    target_features: torch.Tensor,
-    target_labels: torch.Tensor,
-    num_classes: int,
-    temperature: float = 0.10,
-    min_samples: int = 4,
-) -> torch.Tensor:
-    """Local MMD: align class-conditional distributions."""
-    sf = source_features.float()
-    tf = target_features.float()
-    total = sf.new_tensor(0.0)
-    used = 0
-    for c in range(num_classes):
-        sm = source_labels.eq(c)
-        tm = target_labels.eq(c)
-        if int(sm.sum().item()) < min_samples or int(tm.sum().item()) < min_samples:
-            continue
-        s = sf[sm]
-        t = tf[tm]
-        s_mean = s.mean(dim=0, keepdim=True)
-        t_mean = t.mean(dim=0, keepdim=True)
-        total = total + (s_mean - t_mean).pow(2).sum()
-        used += 1
-    if used == 0:
-        return sf.new_tensor(0.0)
-    return total / used
-
-
 def coral_loss(source_features, target_features):
     """Deep CORAL: align second-order statistics."""
     if source_features.size(0) < 2 or target_features.size(0) < 2:
@@ -254,8 +224,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lambda_dual_source", type=float, default=0.0)
     parser.add_argument("--lmmd_start_epoch", type=int, default=80)
     parser.add_argument("--lmmd_warm_epochs", type=int, default=30)
-    parser.add_argument("--lambda_mpa", type=float, default=0.12)
-    parser.add_argument("--lambda_confusion", type=float, default=0.040)
 
     parser.add_argument("--target_noise_std", type=float, default=0.004)
     parser.add_argument("--target_scale_std", type=float, default=0.015)
@@ -1395,7 +1363,6 @@ def run_epoch(
                          if int(args.lmmd_warm_epochs) > 0 else 1.0)
             effective_lmmd_lambda = args.lambda_lmmd * lmmd_warm * maturity_factor
             effective_coral_lambda = args.lambda_coral * maturity_factor
-            confusion_weight = args.lambda_confusion if args.use_confusion_loss else 0.0
             cca_loss = source_loss.new_tensor(0.0)
             cca_lambda = float(args.lambda_cca)
             if (
@@ -1486,6 +1453,47 @@ def run_epoch(
 
 def train(args: argparse.Namespace) -> dict[str, Any]:
     args = apply_ablation_profile(args)
+    # Tooling-only loss ablation (does not affect the default configuration).
+    # LOSS_ABL="scale_pair,center_pair,source_metric,..." zeroes the matching
+    # terms so the same data/seed/config can be compared term by term.
+    _loss_drop = {
+        part.strip().lower()
+        for part in os.environ.get("LOSS_ABL", "").split(",")
+        if part.strip()
+    }
+    if _loss_drop:
+        if "scale_pair" in _loss_drop:
+            args.lambda_scale_pair = 0.0
+        if "center_pair" in _loss_drop:
+            args.lambda_center_pair = 0.0
+        if "source_metric" in _loss_drop:
+            args.lambda_source_metric = 0.0
+        if "feature_consistency" in _loss_drop:
+            args.lambda_feature_consistency = 0.0
+        if "scale_teacher" in _loss_drop:
+            args.lambda_scale_teacher = 0.0
+        if "soft_consistency" in _loss_drop:
+            args.lambda_soft_consistency = 0.0
+        if "cca" in _loss_drop:
+            args.lambda_cca = 0.0
+        if "proto" in _loss_drop:
+            args.prototype_align_flag = False
+        if "coral" in _loss_drop:
+            args.lambda_coral = 0.0
+        if "lmmd" in _loss_drop:
+            args.lambda_lmmd = 0.0
+        if "style_supervision" in _loss_drop:
+            args.lambda_style_supervision = 0.0
+        if "spectral_aux" in _loss_drop:
+            args.lambda_spectral_aux = 0.0
+        if "style_pair" in _loss_drop:
+            args.lambda_style_pair = 0.0
+        if "scale_mi" in _loss_drop:
+            args.lambda_scale_mi = 0.0
+        if "pseudo" in _loss_drop:
+            args.lambda_pseudo = 0.0
+        if "dual_source" in _loss_drop:
+            args.lambda_dual_source = 0.0
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0)) != 0 or args.diagnostic_target_oa:
         raise RuntimeError("v7.1 training forbids all target GT access and in-training OA diagnostics")
     if not getattr(args, "skip_final_evaluation", True):
