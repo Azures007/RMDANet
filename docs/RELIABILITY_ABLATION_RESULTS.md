@@ -463,6 +463,39 @@ Tag：`results_ablation_clean/{ds}/{ds}_{soft_consistency,coral,lmmd,spectral_au
 
 ---
 
+## 10.9 骨干替换实验 S3：MAE 自监督预训练（2026-11-16，失败）
+
+代码分支 `feat/mae-s3`（提交 `a72f690`）：
+- 新增 `scripts/pretrain_mae.py`：在源域+目标域**无标注 patch** 上做 MAE（遮 30% 空间 token，重建被遮 token 完整光谱）；
+- 预训练 15 epochs × 100 steps（batch 128，AdamW lr 1.5e-4，cosine，AMP）；
+- 新增 `--pretrained_backbone`：把 MAE 编码器权重加载进 UDA 训练的 `local3d`（S2 Transformer 骨干）；
+- 其余模块、损失、可靠性配置不变。
+
+机器：vGPU-48GB；seed 1237。
+
+| 数据集 | 基线 OA | S3 OA | ΔOA | S3 AA | S3 Kappa |
+|---|---|---|---|---|---|
+| Pavia | 85.92 | **78.31** | **−7.61** | 75.80 | 0.7379 |
+| Houston | 79.27 | **75.36** | **−3.91** | 76.81 | 0.6279 |
+| HyRANK | 56.00 | **54.10** | **−1.90** | 61.05 | 0.4695 |
+
+**结论：三个数据集全部下降，S3 失败 → 回滚，不采用。**
+MAE 预训练（15 epochs）无法弥补 S2 token 化骨干在 Pavia 小样本上的结构性劣势。
+
+### 骨干替换三次尝试汇总（全部失败）
+
+| 实验 | 内容 | Pavia Δ | Houston Δ | HyRANK Δ | 结论 |
+|---|---|---|---|---|---|
+| S1 | 加宽 3D CNN + SE + 3D 残差 | −2.19 | −3.32 | −2.68 | 过拟合 |
+| S2 | 光谱 token Transformer | −18.53 | −3.48 | +0.92 | 缺局部归纳偏置 |
+| S3 | S2 + MAE 预训练 | −7.61 | −3.91 | −1.90 | 预训练救不回 |
+
+**总结：在 patch 7 + 180/class 的 HSI-UDA 设定下，原来的窄 3D CNN 骨干（24/40/64 + 2D 残差语义 + ASPP + RCGP）仍是最优结构；骨干替换方向到此终止。**
+
+剩余提分选项：TTA + 多 seed 集成 + EMA 权重平均（零重训，预计 +0.5~1.5）；或高工作量的 HSI 基础模型（SpectralGPT 类，风险高）。
+
+---
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。
