@@ -524,8 +524,14 @@ class ReliabilityPrototypeMemory:
             0.82 * self.reliability_memory[sample_ids] + 0.18 * reliability
         )
 
-        spatial_veto = spatial_support.lt(3.0) | (
-            spatial_agreement & spatial_score.ge(0.42)
+        # High-confidence override: not a reliability component, it only lets
+        # extremely confident samples bypass the spatial veto (as in the
+        # validated 8-component implementation).
+        exceptional = (confidence >= 0.96) & (margin >= 0.22)
+        spatial_veto = (
+            spatial_support.lt(3.0)
+            | (spatial_agreement & spatial_score.ge(0.42))
+            | exceptional
         )
         stable = (
             (reliability >= self.reliability_threshold)
