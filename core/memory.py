@@ -50,12 +50,6 @@ class ReliabilityPrototypeMemory:
         min_age: int = 2,
         min_streak: int = 2,
         use_probability_history: bool = True,
-        use_time_score: bool = True,
-        use_feature_score: bool = True,
-        use_view_score: bool = True,
-        use_guard: bool = True,
-        use_prototype_veto: bool = True,
-        use_spatial: bool = True,
         use_target_prototypes: bool = True,
         reliability_weighted_prototype_update: bool = True,
         adaptive_anchor: bool = True,
@@ -84,12 +78,6 @@ class ReliabilityPrototypeMemory:
         self.min_age = int(min_age)
         self.min_streak = int(min_streak)
         self.use_probability_history = bool(use_probability_history)
-        self.use_time_score = bool(use_time_score)
-        self.use_feature_score = bool(use_feature_score)
-        self.use_view_score = bool(use_view_score)
-        self.use_guard = bool(use_guard)
-        self.use_prototype_veto = bool(use_prototype_veto)
-        self.use_spatial = bool(use_spatial)
         self.use_target_prototypes = bool(use_target_prototypes)
         self.reliability_weighted_prototype_update = bool(
             reliability_weighted_prototype_update
@@ -405,27 +393,6 @@ class ReliabilityPrototypeMemory:
         spatial_score = torch.where(no_support, torch.zeros_like(spatial_score), spatial_score)
         return consensus, spatial_score, support
 
-    @torch.no_grad()
-    def _source_prototype_evidence(
-        self,
-        features: torch.Tensor,
-        labels: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        if not self.source_valid.any():
-            return torch.ones(features.size(0), device=features.device), torch.ones(
-                features.size(0), dtype=torch.bool, device=features.device
-            )
-        normalized = F.normalize(features.detach().float(), dim=1)
-        prototypes = F.normalize(self.source_prototypes.float(), dim=1)
-        similarities = normalized @ prototypes.t()
-        similarities[:, ~self.source_valid] = -1e4
-        predicted = similarities.argmax(dim=1)
-        best = similarities.max(dim=1).values
-        agreement = predicted.eq(labels)
-        score = torch.sigmoid((best - 0.20) / 0.10)
-        score = score * (0.40 + 0.60 * agreement.float())
-        return score.clamp(0.0, 1.0), agreement
-
     def class_conditional_alignment(
         self, target_features: torch.Tensor, temperature: float = 0.10
     ) -> torch.Tensor:
@@ -459,14 +426,15 @@ class ReliabilityPrototypeMemory:
         student_probabilities: torch.Tensor,
         teacher_features: torch.Tensor,
         strong_probabilities: torch.Tensor | None = None,
-        guard_probabilities: torch.Tensor | None = None,
     ) -> ReliabilityBatch:
         """Update cross-epoch memory and return only conservatively stable samples.
 
         Labels, confidence and margin come from the updated probability memory,
-        not from a single current prediction.  Current teacher, student, strong
-        view, frozen semantic guard, source prototype and spatial neighborhood
-        are used as independent vetoes.  This prevents excessive pseudo-label coverage from becoming confirmation bias.
+        not from a single current prediction.  The unified reliability score is
+        the geometric mean of exactly three components: confidence, multi-view
+        agreement and spatial-neighborhood agreement.  All other components
+        (margin, time, feature-drift, semantic guard, source-prototype) were
+        removed after the component ablation.
         """
         sample_ids = sample_ids.long()
         teacher_probabilities = teacher_probabilities.detach().float().clamp_min(1e-8)
@@ -533,93 +501,38 @@ class ReliabilityPrototypeMemory:
         if strong_probabilities is not None:
             strong_probabilities = strong_probabilities.detach().float().clamp_min(1e-8)
             agreement = agreement & labels.eq(strong_probabilities.argmax(dim=1))
-        if not self.use_view_score:
-            agreement = torch.ones_like(agreement)
-
-        if (not self.use_guard) or guard_probabilities is None:
-            guard_agreement = torch.ones_like(agreement)
-        else:
-            guard_probabilities = guard_probabilities.detach().float().clamp_min(1e-8)
-            guard_agreement = labels.eq(guard_probabilities.argmax(dim=1))
-
-        if self.use_spatial:
-            spatial_probabilities, spatial_score, spatial_support = self._spatial_consensus(
-                sample_ids, teacher_features, updated_probabilities
-            )
-            spatial_labels = spatial_probabilities.argmax(dim=1)
-            spatial_agreement = spatial_labels.eq(labels)
-        else:
-            spatial_probabilities = probability_basis
-            spatial_score = confidence.new_zeros(confidence.shape)
-            spatial_support = confidence.new_zeros(confidence.shape)
-            spatial_agreement = torch.ones_like(agreement)
-
-        if self.use_prototype_veto:
-            prototype_score, prototype_agreement = self._source_prototype_evidence(
-                teacher_features, labels
-            )
-        else:
-            prototype_score = torch.ones_like(confidence)
-            prototype_agreement = torch.ones_like(agreement)
+        spatial_probabilities, spatial_score, spatial_support = self._spatial_consensus(
+            sample_ids, teacher_features, updated_probabilities
+        )
+        spatial_labels = spatial_probabilities.argmax(dim=1)
+        spatial_agreement = spatial_labels.eq(labels)
 
         thresholds = self.class_thresholds()[labels]
         confidence_score = torch.sigmoid((confidence - thresholds) / 0.035)
-        margin_score = torch.sigmoid((margin - self.pseudo_margin) / 0.030)
-        age_score = (self.age[sample_ids].float() / 7.0).clamp(0.0, 1.0)
-        streak_score = (self.streak[sample_ids].float() / 6.0).clamp(0.0, 1.0)
-        time_score = torch.sqrt((age_score * streak_score).clamp_min(1e-8))
-        drift_score = torch.exp(-feature_drift / 0.14).clamp(0.0, 1.0)
         view_score = 0.10 + 0.90 * agreement.float()
-        guard_score = 0.20 + 0.80 * guard_agreement.float()
         spatial_component = torch.where(
             spatial_support.ge(3.0),
             0.20 + 0.80 * spatial_score * spatial_agreement.float(),
             torch.ones_like(spatial_score),
         )
-        components = [confidence_score, margin_score]
-        if self.use_time_score:
-            components.append(time_score)
-        if self.use_feature_score:
-            components.append(drift_score)
-        if self.use_view_score:
-            components.append(view_score)
-        if self.use_guard:
-            components.append(guard_score)
-        if self.use_prototype_veto:
-            components.append(prototype_score)
-        if self.use_spatial:
-            components.append(spatial_component)
+        components = [confidence_score, view_score, spatial_component]
         product = torch.ones_like(confidence_score)
         for component in components:
             product = product * component
-        reliability = (product + 1e-12).pow(1.0 / float(len(components))).clamp(0.0, 1.0)
+        reliability = (product + 1e-12).pow(1.0 / 3.0).clamp(0.0, 1.0)
         self.reliability_memory[sample_ids] = (
             0.82 * self.reliability_memory[sample_ids] + 0.18 * reliability
         )
 
-        exceptional = (confidence >= 0.96) & (margin >= 0.22)
-        prototype_veto = prototype_agreement | exceptional
-        guard_veto = guard_agreement | (exceptional & prototype_agreement)
-        spatial_veto = (
-            spatial_support.lt(3.0)
-            | (spatial_agreement & spatial_score.ge(0.42))
-            | exceptional
+        spatial_veto = spatial_support.lt(3.0) | (
+            spatial_agreement & spatial_score.ge(0.42)
         )
         stable = (
             (reliability >= self.reliability_threshold)
             & (confidence >= thresholds)
-            & (margin >= self.pseudo_margin)
+            & agreement
+            & spatial_veto
         )
-        if self.use_time_score:
-            stable = stable & (self.age[sample_ids] >= self.min_age) & (self.streak[sample_ids] >= self.min_streak)
-        if self.use_view_score:
-            stable = stable & agreement
-        if self.use_prototype_veto:
-            stable = stable & prototype_veto
-        if self.use_guard:
-            stable = stable & guard_veto
-        if self.use_spatial:
-            stable = stable & spatial_veto
         # Cleanlab 过滤必须在 class-cap 之前，否则噪声样本先占 quota
         stable = stable & self.clean_mask[sample_ids]
         stable = self._class_balanced_top_mask(labels, reliability, stable)
@@ -643,7 +556,7 @@ class ReliabilityPrototypeMemory:
             spatial_probabilities=spatial_probabilities,
             spatial_score=spatial_score,
             spatial_support=spatial_support,
-            prototype_agreement=prototype_agreement,
+            prototype_agreement=torch.ones_like(agreement),
         )
 
     @torch.no_grad()
@@ -750,8 +663,6 @@ class ReliabilityPrototypeMemory:
             & (confidence >= thresholds - 0.03)
             & (margin >= 0.5 * self.pseudo_margin)
         )
-        if self.use_time_score:
-            eligible = eligible & (self.age[sample_ids] >= self.min_age)
         for class_id in range(self.num_classes):
             class_mask = labels.eq(class_id)
             accepted = int((selected & class_mask).sum().item())

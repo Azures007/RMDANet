@@ -349,11 +349,11 @@ def apply_ablation_profile(args: argparse.Namespace) -> argparse.Namespace:
     args.prat_mode = "full"
     args.pseudo_mode = "history"  # off | current | history
     args.use_probability_history = True
-    args.use_time_score = True
-    args.use_feature_score = True
+    args.use_time_score = False
+    args.use_feature_score = False
     args.use_view_score = True
-    args.use_guard = True
-    args.use_prototype_veto = True
+    args.use_guard = False
+    args.use_prototype_veto = False
     args.use_spatial_reliability = True
     args.use_target_prototypes = True
     args.reliability_weighted_prototype_update = True
@@ -1171,7 +1171,6 @@ def run_epoch(
 
             teacher_target = None
             teacher_probability = None
-            guard_probability = None
             strong_target = None
             if target_adaptation:
                 strong_target = strong_target_augmentation(target_x, args)
@@ -1182,10 +1181,6 @@ def run_epoch(
                     teacher_probability = memory.refine_probabilities(
                         teacher_probability, teacher_target.features
                     )
-                if args.use_guard and guard_model is not None:
-                    with autocast_context(device, args.amp):
-                        guard_target = guard_model(target_x)
-                    guard_probability = reliable_output_probability(guard_target)
 
         optimizer.zero_grad(set_to_none=True)
         with autocast_context(device, args.amp):
@@ -1289,7 +1284,6 @@ def run_epoch(
                         target_probability,
                         teacher_target.features,
                         strong_probability,
-                        guard_probability,
                     )
                 # A perturbation test that does not reuse the stable_mask as evidence.
                 # This attenuates (does not hard-reject) pseudo-supervision when
@@ -1595,12 +1589,6 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         min_streak=args.cempa_min_streak,
         pseudo_min_per_class=int(getattr(args, "pseudo_min_per_class", 0)),
         use_probability_history=args.use_probability_history,
-        use_time_score=args.use_time_score,
-        use_feature_score=args.use_feature_score,
-        use_view_score=args.use_view_score,
-        use_guard=args.use_guard,
-        use_prototype_veto=args.use_prototype_veto,
-        use_spatial=args.use_spatial_reliability,
         use_target_prototypes=args.use_target_prototypes,
         reliability_weighted_prototype_update=args.reliability_weighted_prototype_update,
         adaptive_anchor=args.adaptive_anchor,
