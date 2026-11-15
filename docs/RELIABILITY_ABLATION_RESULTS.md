@@ -372,6 +372,27 @@ conf | margin | time | drift | view | guard | proto | spatial
 | **E7a** | cca | **74.96（−10.96）** | 79.06（−0.21） | 57.64（+1.64） |
 | **E7b** | proto | 85.72（−0.20） | 78.89（−0.38） | 55.84（−0.16） |
 
+### E5 3 seed 验证（正式删除依据）
+
+机器：vGPU-48GB，seed 1237/1239/1241，同机同配置。
+
+| 集合 | Pavia 3 seed | 均值±std | Houston 3 seed | 均值±std | HyRANK 3 seed | 均值±std |
+|---|---|---|---|---|---|---|
+| **Full** | 85.92 / 86.05 / 84.80 | **85.59 ± 0.56** | 79.27 / 79.16 / 77.77 | **78.73 ± 0.68** | 56.00 / 57.75 / 56.47 | **56.74 ± 0.74** |
+| **E5**（删 feature+scale teacher） | 85.91 / 86.06 / 85.07 | **85.68 ± 0.44** | 79.05 / 79.13 / 77.52 | **78.57 ± 0.74** | 56.32 / 57.49 / 56.15 | **56.65 ± 0.60** |
+| Δ（E5 − Full） | — | **+0.09** | — | **−0.16** | — | **−0.09** |
+
+**判定：三个数据集的差异均在噪声内（≤0.2）→ 正式删除 `feature_consistency` 与 `scale_teacher`。**
+
+删除后的最终状态：
+
+| 项 | 变化 |
+|---|---|
+| 总损失加权项 | 17 → **15**（默认生效 14 → **12**，另有 dual-head 默认关） |
+| 教师一致性 | 只剩 **soft 蒸馏**（`teacher_consistency_losses` 已精简为只返回 soft） |
+| 删除提交 | 本地 `6810047`；服务器 vGPU `00ce8bf` |
+| 删除后基线（即 E5 数字） | Pavia **85.68 ± 0.44**、Houston **78.57 ± 0.74**、HyRANK **56.65 ± 0.60** |
+
 ### 结论
 
 | 损失 | 判定 | 依据 |
@@ -380,7 +401,7 @@ conf | margin | time | drift | view | guard | proto | spatial
 | CCA | **必须保留** | E7a：Pavia −10.96 |
 | Prototype (flagment) | **保留** | E7b：三数据集均降，Houston −0.38 |
 | 外部 scale_pair / center_pair | **保留** | E1：Pavia −1.88 |
-| **feature_consistency + scale_teacher** | **唯一可删候选** | E5：Pavia −0.01、Houston −0.22、HyRANK +0.32（净中性，需 3 seed 确认） |
+| **feature_consistency + scale_teacher** | ✅ **已正式删除**（3 seed 验证） | E5 3 seed：Pavia +0.09、Houston −0.16、HyRANK −0.09（均在噪声内） |
 | 已删除的无用项 | ✅ 已删 | `lmmd_loss`（从未调用）、`lambda_mpa`、`lambda_confusion`（计算但未入总损失） |
 | Dual-head Source CE | 保留代码 | 默认关闭（`lambda_dual_source=0`） |
 
