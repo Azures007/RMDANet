@@ -413,6 +413,25 @@ conf | margin | time | drift | view | guard | proto | spatial
 | E5–E7b | `results_ablation_clean/{pavia,houston,hyrank}/{ds}_{full,e5,e6,e7a,e7b}_srv3_seed1237` |
 | 日志 | `/root/autodl-tmp/loss_abl.log`（E1–E4）、`/root/autodl-tmp/loss_abl2.log`（Full/E5–E7b） |
 
+## 10.6 第二轮损失筛选（5 个候选，2 seed × 3 数据集，2026-11-15）
+
+候选：`soft_consistency`、`coral`、`lmmd`、`spectral_aux`、`scale_mi`（在最终代码 Full 上逐个关闭）。
+机器：vGPU-48GB；seed 1237 / 1239；日志 `/root/autodl-tmp/loss_screen.log`。
+
+基线（最终代码 Full）：Pavia 85.92 / 86.05；Houston 79.27 / 79.16；HyRANK 56.00 / 57.75。
+
+| 候选 | Pavia s1237 / s1239 | Houston s1237 / s1239 | HyRANK s1237 / s1239 | 判定 |
+|---|---|---|---|---|
+| 删 **soft_consistency** | 84.70（−1.22）/ 85.23（−0.82） | 78.47（−0.80）/ 78.46（−0.70） | 55.68（−0.32）/ 57.08（−0.67） | **保留**（全差） |
+| 删 **coral** | 85.05（−0.87）/ **73.88（−12.17）** | 79.20（−0.07）/ 79.04（−0.12） | 56.71（+0.71）/ 58.17（+0.42） | **保留**（Pavia 崩） |
+| 删 **lmmd** | 83.75（−2.17）/ 85.38（−0.67） | 79.11（−0.16）/ 79.26（+0.10） | 56.18（+0.18）/ 58.01（+0.26） | **保留**（Pavia 明显降） |
+| 删 **spectral_aux** | **69.88（−6.04）**/ 84.67（−1.38） | 78.65（−0.62）/ 79.01（−0.15） | 52.70（−3.30）/ 55.83（−1.92） | **保留**（两数据集崩） |
+| 删 **scale_mi** | 85.30（−0.62）/ **81.98（−4.07）** | 78.89（−0.38）/ 79.11（−0.05） | 55.41（−0.59）/ 57.59（−0.16） | **保留**（Pavia 明显降） |
+
+**结论：5 个候选在 2 个 seed 上均出现至少一个数据集明显下降（>0.3），全部保留。损失精简到此为止（15 个加权项，默认生效 14 项）。**
+
+Tag：`results_ablation_clean/{ds}/{ds}_{soft_consistency,coral,lmmd,spectral_aux,scale_mi}_2s_s{1237,1239}_seed{seed}`
+
 ---
 
 ## 11. 注意事项与坑（避免后续误用）
