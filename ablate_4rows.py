@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "core"))
 import trainer
 
-DATASET_DIR = {"pavia": "Pavia", "houston": "Houston", "hyrank": "HyRANK"}
+DATASET_DIR = {"pavia": "Pavia", "houston": "Houston", "hyrank": "HyRANK", "yrd": "YRD_extract/YRD"}
 PAVIA_DATA = "/root/autodl-tmp/Test_1/PTMDA-Net_ReliabilityCore_Final_Standalone/Datasets"
 
 ROWS = {
