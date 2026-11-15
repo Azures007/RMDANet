@@ -204,11 +204,28 @@ conf | margin | time | drift | view | guard | proto | spatial
 | 项 | 内容 |
 |---|---|
 | 统一可靠性 | **3 分量：confidence + view + spatial**（几何平均，m=3） |
-| 适用数据集 | Pavia、Houston（以及后续 YRD）走记忆路径 |
-| HyRANK | 保持 `--abl-history 0` 当前伪标签路径（conf×margin×view），不启用统一可靠性 |
+| 适用数据集 | Pavia、Houston、HyRANK **全部统一使用默认设置**（自 2026-11-15 起取消 HyRANK 特殊配置） |
 | 删除的分量 | margin、time、drift、guard、proto（含代码分支与辅助方法） |
-| 最终代码 | `feat/reliability-3comp` @ `94313f3`，tag `reliability-3comp-2026-11-15`（已推 GitHub） |
+| 非分量规则 | spatial veto 中保留 **exceptional 高置信放行**（confidence≥0.96 且 margin≥0.22，不属于可靠性分量） |
+| 最终代码 | 本地主路径 `D:\桌面\退路代码\RMDANet最新版`；GitHub 分支 `feat/yrd-support` @ `87abe6c`；服务器 `feat/reliability-3comp` @ `8c0b1ab` |
 | 精简后公式 | \(R_i=\left(R^{conf}_i\cdot R^{view}_i\cdot R^{spatial}_i\right)^{1/3}\)，EMA 0.82/0.18 保留 |
+
+### 8.1 最终确认结果（seed 1237，最终干净代码 + restored exceptional）
+
+| 数据集 | OA | AA | Kappa |
+|---|---|---|---|
+| Pavia | **85.92** | 83.64 | 0.8305 |
+| Houston | **79.27** | 82.61 | 0.6819 |
+| HyRANK（统一默认配置） | **56.00** | 59.55 | 0.4840 |
+
+对比"删除前"（8 分量、旧配置，seed 1237）：
+
+| 数据集 | 删除前 | 删除后（最终） | ΔOA |
+|---|---|---|---|
+| Pavia | 85.73 | **85.92** | **+0.19** |
+| Houston | 79.06 | **79.27** | **+0.21** |
+| HyRANK | 60.85（旧特殊配置） | **56.00（统一配置）** | **−4.85**（配置统一的代价，非分量删除导致） |
+
 
 ### 论文表述建议（可直接改写）
 
