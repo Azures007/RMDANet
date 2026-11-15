@@ -216,8 +216,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lambda_center_pair", type=float, default=0.012)
     parser.add_argument("--lambda_pseudo", type=float, default=0.38)
     parser.add_argument("--lambda_soft_consistency", type=float, default=0.12)
-    parser.add_argument("--lambda_feature_consistency", type=float, default=0.04)
-    parser.add_argument("--lambda_scale_teacher", type=float, default=0.008)
     parser.add_argument("--lambda_coral", type=float, default=0.0)
     parser.add_argument("--lambda_lmmd", type=float, default=0.0)
     parser.add_argument("--dual_head_filter", action=argparse.BooleanOptionalAction, default=False)
@@ -609,25 +607,12 @@ def teacher_consistency_losses(
     teacher_output: ModelOutput,
     reliability: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
+    """Reliability-weighted soft distillation from the EMA teacher."""
     teacher_probability = F.softmax(teacher_output.logits.detach().float(), dim=1).clamp_min(1e-8)
     log_student = F.log_softmax(strong_output.logits.float(), dim=1)
     soft_ce = -(teacher_probability * log_student).sum(dim=1)
-    feature_distance = 1.0 - torch.sum(
-        strong_output.features.float() * teacher_output.features.detach().float(), dim=1
-    )
-    scale_distance = torch.mean(
-        (
-            strong_output.scale_weights.float()
-            - teacher_output.scale_weights.detach().float()
-        ).pow(2),
-        dim=1,
-    )
     weights = reliability.detach().pow(2).clamp_min(1e-5)
-    return {
-        "soft": weighted_mean(soft_ce, weights),
-        "feature": weighted_mean(feature_distance, weights),
-        "scale": weighted_mean(scale_distance, weights),
-    }
+    return {"soft": weighted_mean(soft_ce, weights)}
 
 
 def source_metric_loss(
@@ -1331,8 +1316,6 @@ def run_epoch(
                 pseudo_loss = source_loss.new_tensor(0.0)
                 teacher_losses = {
                     "soft": source_loss.new_tensor(0.0),
-                    "feature": source_loss.new_tensor(0.0),
-                    "scale": source_loss.new_tensor(0.0),
                 }
                 proto_loss = source_loss.new_tensor(0.0)
                 proto_used = source_loss.new_tensor(0.0)
@@ -1401,8 +1384,6 @@ def run_epoch(
                 + cca_lambda * cca_loss
                 + pseudo_ramp * args.lambda_pseudo * pseudo_loss
                 + pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]
-                + pseudo_ramp * args.lambda_feature_consistency * teacher_losses["feature"]
-                + pseudo_ramp * args.lambda_scale_teacher * teacher_losses["scale"]
                 + pseudo_ramp * float(getattr(args, "prototype_weight", 0.05)) * proto_loss
             )
 
@@ -1423,7 +1404,6 @@ def run_epoch(
             "pseudo": pseudo_loss.detach(),
             "pseudo_effective": pseudo_loss.detach() * float(pseudo_ramp),
             "soft": teacher_losses["soft"].detach(),
-            "feature": teacher_losses["feature"].detach(),
             "metric": metric_loss.detach(),
             "style_pair": pair_loss.detach(),
             "scale_mi": scale_mi.detach(),
@@ -1468,10 +1448,6 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             args.lambda_center_pair = 0.0
         if "source_metric" in _loss_drop:
             args.lambda_source_metric = 0.0
-        if "feature_consistency" in _loss_drop:
-            args.lambda_feature_consistency = 0.0
-        if "scale_teacher" in _loss_drop:
-            args.lambda_scale_teacher = 0.0
         if "soft_consistency" in _loss_drop:
             args.lambda_soft_consistency = 0.0
         if "cca" in _loss_drop:
