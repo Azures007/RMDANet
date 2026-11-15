@@ -55,7 +55,6 @@ def main():
        aspp_mode=t.aspp_mode,pooling_mode=t.pooling_mode,
        spectral_fusion_mode=t.spectral_fusion_mode,amplitude_channel=t.amplitude_channel,
        use_spectral_branch=has_spectral_branch,
-       enable_dual_head=(t.dual_head_filter or t.lambda_dual_source > 0),
        pool_center_size=getattr(t,"pool_center_size",5),
        pool_temperature=getattr(t,"pool_temperature",0.30),
        pool_gate_init=tuple(float(v) for v in str(getattr(t,"pool_gate_init","0.6,0.3,0.1")).split(",")),

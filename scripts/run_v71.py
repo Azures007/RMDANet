@@ -50,9 +50,6 @@ def get_args(options):
     if options.no_independent_target_reweight:
         # v6-compatible behavior: do not downweight brittle target pseudo labels.
         args.independent_target_reweight = False
-    if options.dual_head_filter:
-        args.dual_head_filter = True
-        args.lambda_dual_source = options.dual_source_weight
     # Enforce only the training protocol; original v6 algorithms/configs stay unchanged.
     args.use_gt_target_mask = False
     args.target_gt_mix_ratio = 0.0
@@ -80,8 +77,6 @@ def main():
     p.add_argument('--source-budget-train-fraction', type=float)
     p.add_argument('--no-alignment-gate', action='store_true')
     p.add_argument('--no-independent-target-reweight', action='store_true')
-    p.add_argument('--dual-head-filter', action='store_true')
-    p.add_argument('--dual-source-weight', type=float, default=0.10)
     p.add_argument('--dry-run', action='store_true')
     opt = p.parse_args()
     a = get_args(opt)

@@ -431,7 +431,6 @@ class ModelOutput:
     context_logits: torch.Tensor
     spectral_logits: torch.Tensor
     spectral_reliability: torch.Tensor
-    logits2: torch.Tensor | None = None
 
 
 
@@ -447,7 +446,6 @@ class DualReliabilityEncoder(nn.Module):
         spectral_fusion_mode: str = "reliable",
         amplitude_channel: bool = False,
         use_spectral_branch: bool = True,
-        enable_dual_head: bool = False,
         pool_center_size: int = 3,
         pool_temperature: float = 0.12,
         pool_gate_init: tuple[float, float, float] = (0.38, 0.47, 0.15),
@@ -462,7 +460,6 @@ class DualReliabilityEncoder(nn.Module):
         fusion_w_max: float = 0.90,
     ) -> None:
         super().__init__()
-        self.enable_dual_head = bool(enable_dual_head)
         self.bands = int(bands)
         self.num_classes = int(num_classes)
         self.projection_dim = int(projection_dim)
@@ -512,8 +509,6 @@ class DualReliabilityEncoder(nn.Module):
         else:
             self.spectral_encoder = None
         self.classifier = CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
-        self.classifier2 = (CosineClassifier(self.projection_dim, self.num_classes, initial_scale=12.0)
-                            if self.enable_dual_head else None)
         if self.use_spectral_branch:
             self.spectral_fusion = SpectralReliabilityFusion(
                 self.projection_dim,
@@ -581,10 +576,8 @@ class DualReliabilityEncoder(nn.Module):
             spectral_reliability = torch.ones(
                 context_features.size(0), device=context_features.device, dtype=context_features.dtype
             )
-        logits2 = self.classifier2(features) if self.classifier2 is not None else None
         return ModelOutput(
             logits=logits,
-            logits2=logits2,
             features=features,
             scale_weights=scale_weights,
             center_weights=center_weights,

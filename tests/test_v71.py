@@ -58,10 +58,3 @@ def test_independent_view_and_js_agreement():
     assert x2.shape==x.shape
     p=torch.tensor([[.95,.05],[.2,.8]])
     assert torch.allclose(js_agreement(p,p),torch.ones(2),atol=1e-6)
-
-
-def test_secondary_head_is_dormant_only_when_explicit():
-    base=DualReliabilityEncoder(bands=24,num_classes=3,projection_dim=32)
-    assert base.classifier2 is None
-    with_head=DualReliabilityEncoder(bands=24,num_classes=3,projection_dim=32,enable_dual_head=True)
-    assert with_head.classifier2 is not None

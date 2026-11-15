@@ -218,8 +218,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lambda_soft_consistency", type=float, default=0.12)
     parser.add_argument("--lambda_coral", type=float, default=0.0)
     parser.add_argument("--lambda_lmmd", type=float, default=0.0)
-    parser.add_argument("--dual_head_filter", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--lambda_dual_source", type=float, default=0.0)
     parser.add_argument("--lmmd_start_epoch", type=int, default=80)
     parser.add_argument("--lmmd_warm_epochs", type=int, default=30)
 
@@ -1148,14 +1146,6 @@ def run_epoch(
                 weight=class_weights,
                 label_smoothing=args.label_smoothing,
             )
-            if getattr(source_output, "logits2", None) is not None:
-                source_loss2 = F.cross_entropy(
-                    source_output.logits2, source_y,
-                    weight=class_weights,
-                    label_smoothing=args.label_smoothing,
-                )
-            else:
-                source_loss2 = source_loss.new_tensor(0.0)
             styled_supervision = (
                 F.cross_entropy(
                     styled_output.logits,
@@ -1272,15 +1262,6 @@ def run_epoch(
             )
             if target_adaptation:
                 assert target_output is not None and strong_target_output is not None and teacher_target is not None
-                if (
-                    args.dual_head_filter
-                    and getattr(strong_target_output, "logits2", None) is not None
-                    and reliability_batch is not None
-                ):
-                    p1 = F.softmax(strong_target_output.logits.float(), dim=1)
-                    p2 = F.softmax(strong_target_output.logits2.float(), dim=1)
-                    consistent = p1.argmax(dim=1).eq(p2.argmax(dim=1))
-                    reliability_batch.stable_mask = reliability_batch.stable_mask & consistent
                 pseudo_loss = memory.weighted_pseudo_loss(
                     strong_target_output.logits, reliability_batch
                 )
@@ -1379,7 +1360,6 @@ def run_epoch(
                 + (args.lambda_scale_pair if args.use_prat else 0.0) * scale_pair
                 + (args.lambda_center_pair if args.use_prat else 0.0) * center_pair
                 + effective_coral_lambda * coral_term
-                + args.lambda_dual_source * source_loss2
                 + effective_lmmd_lambda * lmmd_term
                 + cca_lambda * cca_loss
                 + pseudo_ramp * args.lambda_pseudo * pseudo_loss
@@ -1468,14 +1448,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             args.lambda_scale_mi = 0.0
         if "pseudo" in _loss_drop:
             args.lambda_pseudo = 0.0
-        if "dual_source" in _loss_drop:
-            args.lambda_dual_source = 0.0
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0)) != 0 or args.diagnostic_target_oa:
         raise RuntimeError("v7.1 training forbids all target GT access and in-training OA diagnostics")
     if not getattr(args, "skip_final_evaluation", True):
         raise RuntimeError("v7.1 requires locked independent final evaluation")
-    if args.dual_head_filter and args.lambda_dual_source <= 0:
-        raise ValueError("dual_head_filter requires supervised classifier2: --lambda-dual-source > 0")
     if not 0.0 < float(args.source_budget_train_fraction) <= 1.0:
         raise ValueError("source_budget_train_fraction must be in (0, 1]")
     set_seed(args.seed, args.deterministic)
@@ -1520,7 +1496,6 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         spectral_fusion_mode=args.spectral_fusion_mode,
         amplitude_channel=args.amplitude_channel,
         use_spectral_branch=getattr(args, "use_spectral_branch", True),
-        enable_dual_head=(args.dual_head_filter or args.lambda_dual_source > 0),
         pool_center_size=args.pool_center_size,
         pool_temperature=args.pool_temperature,
         pool_gate_init=tuple(float(v) for v in str(args.pool_gate_init).split(",")),
