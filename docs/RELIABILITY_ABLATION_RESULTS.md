@@ -342,6 +342,58 @@ conf | margin | time | drift | view | guard | proto | spatial
 
 ---
 
+## 10.5 损失函数消融（2026-11-15，固定 seed 1237）
+
+### 实验设置
+
+| 项 | 值 |
+|---|---|
+| 机器 | `autodl-container-0c0340adb1-24d42954`，NVIDIA vGPU-48GB，驱动 580.76.05 |
+| 代码 | `feat/reliability-3comp` @ `0a854ad`（含 `LOSS_ABL` 开关和无用损失清理） |
+| 方法 | 环境变量 `LOSS_ABL="term1,term2"` 把对应损失权重置 0；空 = Full |
+| 基线核对 | 本机 Full seed1237 = **85.92 / 79.27 / 56.00**（与旧 4090 服务器逐位一致） |
+
+### E1–E4（旧 4090 服务器；Full 基线同机 85.92 / 79.27 / 56.00）
+
+| 实验 | 关闭项 | Pavia OA | Houston OA | HyRANK OA |
+|---|---|---|---|---|
+| E1 | 外部 scale_pair + center_pair | 84.04（−1.88） | 79.28（+0.01） | 55.64（−0.36） |
+| E2 | E1 + source_metric | 85.54（−0.38） | 78.73（−0.54） | 52.57（−3.43） |
+| E3 | E1 + feature_consistency + scale_teacher | 84.17（−1.75） | 79.54（+0.27） | 55.81（−0.19） |
+| E4 | E1 + CCA + Prototype | 76.38（−9.54） | 78.91（−0.36） | 58.00（+2.00） |
+
+### E5–E7b（vGPU-48GB 服务器，全部同机对比，Full 已重跑）
+
+| 实验 | 关闭项 | Pavia OA | Houston OA | HyRANK OA |
+|---|---|---|---|---|
+| Full_srv3 | 无 | 85.92 | 79.27 | 56.00 |
+| **E5** | feature_consistency + scale_teacher | 85.91（−0.01） | 79.05（−0.22） | 56.32（+0.32） |
+| **E6** | source_metric | **77.95（−7.97）** | 79.48（+0.21） | 54.97（−1.03） |
+| **E7a** | cca | **74.96（−10.96）** | 79.06（−0.21） | 57.64（+1.64） |
+| **E7b** | proto | 85.72（−0.20） | 78.89（−0.38） | 55.84（−0.16） |
+
+### 结论
+
+| 损失 | 判定 | 依据 |
+|---|---|---|
+| Source Metric | **必须保留** | E6：Pavia −7.97、HyRANK −1.03 |
+| CCA | **必须保留** | E7a：Pavia −10.96 |
+| Prototype (flagment) | **保留** | E7b：三数据集均降，Houston −0.38 |
+| 外部 scale_pair / center_pair | **保留** | E1：Pavia −1.88 |
+| **feature_consistency + scale_teacher** | **唯一可删候选** | E5：Pavia −0.01、Houston −0.22、HyRANK +0.32（净中性，需 3 seed 确认） |
+| 已删除的无用项 | ✅ 已删 | `lmmd_loss`（从未调用）、`lambda_mpa`、`lambda_confusion`（计算但未入总损失） |
+| Dual-head Source CE | 保留代码 | 默认关闭（`lambda_dual_source=0`） |
+
+### 新增 tag / 日志
+
+| 内容 | 位置 |
+|---|---|
+| E1–E4 | `results_ablation_clean/{pavia,houston,hyrank}/{ds}_{e1,e2,e3,e4}_loss_seed1237` |
+| E5–E7b | `results_ablation_clean/{pavia,houston,hyrank}/{ds}_{full,e5,e6,e7a,e7b}_srv3_seed1237` |
+| 日志 | `/root/autodl-tmp/loss_abl.log`（E1–E4）、`/root/autodl-tmp/loss_abl2.log`（Full/E5–E7b） |
+
+---
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。
