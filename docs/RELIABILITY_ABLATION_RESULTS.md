@@ -434,6 +434,35 @@ Tag：`results_ablation_clean/{ds}/{ds}_{soft_consistency,coral,lmmd,spectral_au
 
 ---
 
+## 10.8 骨干替换实验 S2：光谱 token Transformer 编码器（2026-11-16，失败）
+
+代码分支 `feat/transformer-s2`（提交 `90cd3ef` + 形状修复 `e1e3f82`）：
+- 输入 (B,bands,7,7) 先经 depthwise Conv3d(3×3×3) 注入局部上下文；
+- 每个像元光谱作为一个 token（49 token），LayerNorm+Linear(bands→64)；
+- 4 层 pre-norm Transformer（dim 64、4 头、GELU、dropout 0.1）；
+- 输出 reshape 回 (B,64,1,7,7)，其余模块（光谱分支、ASPP、RCGP、可靠性、14 个损失）不变；
+- 参数量约 1.22M。
+
+机器：vGPU-48GB；seed 1237；其余配置与最终代码完全一致。
+
+| 数据集 | 基线 OA | S2 OA | ΔOA | S2 AA | S2 Kappa |
+|---|---|---|---|---|---|
+| Pavia | 85.92 | **67.39** | **−18.53** | 69.18 | 0.6052 |
+| Houston | 79.27 | **75.79** | **−3.48** | 75.49 | 0.6310 |
+| HyRANK | 56.00 | **56.92** | **+0.92** | 58.78 | 0.4956 |
+
+**结论：Pavia/Houston 明显下降（Pavia 崩 18.5 点），判为失败 → 回滚，不采用。**
+唯一亮点：HyRANK +0.92（Transformer 的全局注意力对 12 类、弱先验场景略有帮助），但按"全局统一"原则不能采用。
+
+原因分析：
+- 每像元光谱直接 token 化后缺少局部空间卷积归纳偏置，小样本（180/class）下 Transformer 难以学到 Pavia 所需的细粒度空间结构；
+- 未做自监督预训练（S3），从零训练的 Transformer 在 HSI 小样本 UDA 上不占优；
+- 原 3D CNN 骨干 + DRSE 设计在 patch 7 上更匹配。
+
+后续可选项：S2-fix（3D conv patch embedding + Transformer token mixing，保留局部卷积特征）、S3（MAE 预训练）、或放弃换骨干转 TTA/集成。
+
+---
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。
