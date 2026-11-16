@@ -61,6 +61,53 @@ def _apply_spectral_pca(patch: np.ndarray) -> np.ndarray:
     return reconstructed.reshape(shape).astype(np.float32)
 
 
+_TARGET_FREQ_AMPLITUDE = None
+
+
+def set_target_frequency(amplitude: np.ndarray) -> None:
+    global _TARGET_FREQ_AMPLITUDE
+    _TARGET_FREQ_AMPLITUDE = np.asarray(amplitude, dtype=np.float32)
+
+
+def compute_target_frequency(image: np.ndarray, patch_size: int, samples: int = 200,
+                             seed: int = 0) -> None:
+    """Average 2D FFT amplitude of target patches (FDA reference)."""
+    radius = patch_size // 2
+    padded = np.pad(np.asarray(image, dtype=np.float32),
+                    ((radius, radius), (radius, radius), (0, 0)), mode="symmetric")
+    height, width = np.asarray(image).shape[:2]
+    rng = np.random.default_rng(seed)
+    rows = rng.integers(0, height, size=min(samples, height * width))
+    cols = rng.integers(0, width, size=rows.size)
+    amplitude_total = None
+    for row, col in zip(rows, cols):
+        patch = padded[row:row + patch_size, col:col + patch_size]
+        amplitude = np.abs(np.fft.fft2(patch, axes=(0, 1)))
+        amplitude_total = amplitude if amplitude_total is None else amplitude_total + amplitude
+    set_target_frequency(amplitude_total / max(1, rows.size))
+    print(f"[fft-aug] target frequency reference: {amplitude_total.shape}")
+
+
+def _apply_fft_style(patch: np.ndarray, beta: float = 0.5) -> np.ndarray:
+    if _TARGET_FREQ_AMPLITUDE is None:
+        return patch
+    spectrum = np.fft.fft2(patch, axes=(0, 1))
+    amplitude = np.abs(spectrum)
+    phase = np.angle(spectrum)
+    reference = _TARGET_FREQ_AMPLITUDE
+    if reference.shape != amplitude.shape:
+        return patch
+    height, width, _ = amplitude.shape
+    mask = np.zeros((height, width), dtype=bool)
+    low = 2
+    mask[max(0, height // 2 - low):height // 2 + low + 1,
+         max(0, width // 2 - low):width // 2 + low + 1] = True
+    new_amplitude = amplitude.copy()
+    new_amplitude[mask] = (1.0 - beta) * amplitude[mask] + beta * reference[mask]
+    styled = np.real(np.fft.ifft2(new_amplitude * np.exp(1j * phase), axes=(0, 1)))
+    return styled.astype(np.float32)
+
+
 @dataclass(frozen=True)
 class SceneData:
     image: np.ndarray
@@ -439,6 +486,8 @@ class PatchDataset(Dataset):
         # Frequency-domain augmentation: simulate sensor/illumination variance
         if np.random.random() < 0.4:
             patch = PatchDataset._frequency_augment(patch)
+        if os.environ.get("FFT_AUG", "").strip() == "1" and np.random.random() < 0.7:
+            patch = _apply_fft_style(patch, float(os.environ.get("FFT_AUG_BETA", "0.5")))
         return patch
     
     @staticmethod
