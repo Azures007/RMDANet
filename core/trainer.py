@@ -825,7 +825,9 @@ def evaluate_target(
 
 
 def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, Any]:
-    normalize_mode = "median" if getattr(args, "amplitude_channel", False) else "l2"
+    normalize_mode = getattr(args, "_normalize_mode_override", "") or (
+        "median" if getattr(args, "amplitude_channel", False) else "l2"
+    )
     source_scene = load_source_scene(
         args.data_path, args.source_name, args.num_classes, normalize_mode=normalize_mode
     )
@@ -1475,7 +1477,8 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
             key: os.environ.get(key, "")
             for key in ("BACKBONE_VARIANT", "MERGE_CONSISTENCY", "R1_LOSS",
                         "R1_DROP_SCALE_MI", "LOSS_ABL", "STAGE1_SWA", "STAGE1_STYLE",
-                        "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED")
+                        "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
+                        "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE")
         },
     }
     return snapshot
@@ -1552,6 +1555,21 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             args.lambda_scale_mi = 0.0
         if "pseudo" in _loss_drop:
             args.lambda_pseudo = 0.0
+    # Stage-1 controlled overrides (applied AFTER the ablation profile, so a
+    # single environment variable can change exactly one factor).
+    _pseudo_override = os.environ.get("PSEUDO_MODE_OVERRIDE", "").strip().lower()
+    if _pseudo_override in ("history", "current", "off"):
+        args.pseudo_mode = _pseudo_override
+        args.use_probability_history = _pseudo_override == "history"
+        print(f"[stage1] pseudo_mode override -> {args.pseudo_mode}")
+    _normalize_override = os.environ.get("NORMALIZE_MODE_OVERRIDE", "").strip().lower()
+    if _normalize_override in ("l2", "median"):
+        args._normalize_mode_override = _normalize_override
+        print(f"[stage1] normalize_mode override -> {_normalize_override}")
+    _amplitude_override = os.environ.get("AMPLITUDE_OVERRIDE", "").strip()
+    if _amplitude_override in ("0", "1"):
+        args.amplitude_channel = _amplitude_override == "1"
+        print(f"[stage1] amplitude_channel override -> {args.amplitude_channel}")
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0)) != 0 or args.diagnostic_target_oa:
         raise RuntimeError("v7.1 training forbids all target GT access and in-training OA diagnostics")
     if not getattr(args, "skip_final_evaluation", True):
