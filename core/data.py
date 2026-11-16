@@ -24,7 +24,6 @@ HOUSTON_CLASS_NAMES = [
 ]
 
 
-@dataclass(frozen=True)
 _SPECTRAL_PCA_MEAN = None
 _SPECTRAL_PCA_COMPONENTS = None
 
@@ -62,6 +61,7 @@ def _apply_spectral_pca(patch: np.ndarray) -> np.ndarray:
     return reconstructed.reshape(shape).astype(np.float32)
 
 
+@dataclass(frozen=True)
 class SceneData:
     image: np.ndarray
     ground_truth: np.ndarray | None
