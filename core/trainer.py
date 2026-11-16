@@ -34,7 +34,7 @@ from data import (
 from memory import ReliabilityPrototypeMemory
 from model import DualReliabilityEncoder, ModelOutput
 from prat import PhaseReliabilityResidualAmplitudeTransfer
-from loss_families import family_report
+from loss_families import family_totals
 from v71_controls import (reliability_lmmd, maturity_snapshot, independent_spectral_view,
                           js_agreement)
 
@@ -1370,6 +1370,7 @@ def run_epoch(
 
             # Paper-level four-family view (logging only; total_loss above is
             # numerically unchanged, so accuracy is identical).
+            family_totals_map: dict[str, torch.Tensor] = {}
             if epoch in (1, args.epochs):
                 family_values = {
                     "source_ce": source_loss.detach(),
@@ -1387,7 +1388,7 @@ def run_epoch(
                     "teacher_soft": (pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]).detach(),
                     "pseudo_ce": (pseudo_ramp * args.lambda_pseudo * pseudo_loss).detach(),
                 }
-                print(family_report(family_values))
+                family_totals_map = family_totals(family_values)
 
         scaler.scale(total_loss).backward()
         scaler.unscale_(optimizer)
@@ -1420,6 +1421,7 @@ def run_epoch(
             "alignment_scale": source_loss.new_tensor(maturity_factor),
             "alignment_active_epochs": source_loss.new_tensor(alignment_active_epochs),
             "lmmd_scale": source_loss.new_tensor(effective_lmmd_lambda),
+            **{name: value.detach() for name, value in family_totals_map.items()},
         }
         for key, value in batch_values.items():
             accumulator[key] = accumulator.get(key, 0.0) + float(value.float().item())
@@ -1651,6 +1653,14 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             refinement=False,
             alignment_state=alignment_state,
         )
+        if epoch in (1, args.epochs):
+            family_text = " ".join(
+                f"{name}={metrics[name]:.4f}"
+                for name in ("L_sup", "L_align", "L_cons", "L_self")
+                if name in metrics
+            )
+            if family_text:
+                print("[loss-families] " + family_text)
         if epoch == 1 or epoch % args.log_interval == 0 or epoch == args.epochs:
             elapsed = (time.time() - start_time) / 60.0
             print(
