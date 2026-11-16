@@ -877,6 +877,8 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     # Labels are 1-N in ground truth, 0-(N-1) after -1, so max of ground truth gives N
     num_classes = int(source_scene.ground_truth.max())
     bands = int(source_scene.image.shape[-1])
+    if os.environ.get("FREQ_DUAL", "").strip() == "1":
+        bands *= 2
 
     if os.environ.get("SPECTRAL_PCA", "").strip() not in ("", "0"):
         compute_spectral_pca(
