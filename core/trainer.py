@@ -1512,7 +1512,8 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
             for key in ("BACKBONE_VARIANT", "MERGE_CONSISTENCY", "R1_LOSS",
                         "R1_DROP_SCALE_MI", "LOSS_ABL", "STAGE1_SWA", "STAGE1_STYLE",
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
-                        "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE")
+                        "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
+                        "STAGE2_GATING", "STAGE2_WARMUP")
         },
     }
     return snapshot
