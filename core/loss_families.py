@@ -22,7 +22,7 @@ import torch
 
 FAMILY_MEMBERS: dict[str, tuple[str, ...]] = {
     "L_sup": ("source_ce", "prat_styled_ce", "spectral_aux_ce"),
-    "L_align": ("cca", "source_metric", "coral", "lmmd", "prototype"),
+    "L_align": ("cca", "source_metric", "coral", "lmmd", "prototype", "hard_contrastive"),
     "L_cons": ("style_pair", "scale_pair", "center_pair", "scale_mi", "teacher_soft"),
     "L_self": ("pseudo_ce",),
 }
@@ -36,6 +36,7 @@ SUBTERM_DESCRIPTIONS: dict[str, str] = {
     "coral": "second-order (covariance) feature alignment",
     "lmmd": "reliability-weighted class-conditional mean alignment",
     "prototype": "target features -> source class prototypes",
+    "hard_contrastive": "hard-class cross-domain contrastive (source prototypes)",
     "style_pair": "source vs styled-source composite consistency",
     "scale_pair": "source vs styled-source scale-weight consistency",
     "center_pair": "source vs styled-source centre-weight consistency",

@@ -38,6 +38,7 @@ from loss_families import family_totals
 from v71_controls import (reliability_lmmd, maturity_snapshot, independent_spectral_view,
                           js_agreement)
 from credibility import coral_loss_weighted, target_credibility
+from hard_contrastive import hard_pair_contrastive
 
 
 
@@ -1388,6 +1389,30 @@ def run_epoch(
 
             cca_lambda *= maturity_factor
 
+            # Stage 3: hard-class cross-domain contrastive loss (docx 7.2).
+            stage3_hard = os.environ.get("STAGE3_HARD", "").strip() == "1"
+            stage3_lambda = float(os.environ.get("STAGE3_LAMBDA", "0.05"))
+            stage3_start = int(os.environ.get("STAGE3_START", "20"))
+            hard_term = source_loss.new_tensor(0.0)
+            if (
+                stage3_hard
+                and target_adaptation
+                and strong_target_output is not None
+                and reliability_batch is not None
+                and epoch >= stage3_start
+            ):
+                selected = reliability_batch.stable_mask & reliability_batch.confidence.ge(0.9)
+                if bool(selected.any()):
+                    ramp = min(1.0, (epoch - stage3_start + 1) / 10.0)
+                    hard_term = ramp * hard_pair_contrastive(
+                        strong_target_output.features[selected],
+                        reliability_batch.labels[selected],
+                        memory.source_prototypes,
+                        memory.source_valid,
+                        sample_weights=reliability_batch.reliability[selected],
+                        margin=float(os.environ.get("STAGE3_MARGIN", "0.3")),
+                    )
+
             total_loss = (
                 source_loss
                 + (args.lambda_style_supervision if args.use_prat else 0.0) * styled_supervision
@@ -1403,6 +1428,7 @@ def run_epoch(
                 + pseudo_ramp * args.lambda_pseudo * pseudo_loss
                 + pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]
                 + pseudo_ramp * float(getattr(args, "prototype_weight", 0.05)) * proto_loss
+                + stage3_lambda * hard_term
             )
 
             # Paper-level four-family view (logging only; total_loss above is
@@ -1423,6 +1449,7 @@ def run_epoch(
                     "center_pair": ((args.lambda_center_pair if args.use_prat else 0.0) * center_pair).detach(),
                     "scale_mi": (args.lambda_scale_mi * scale_mi).detach(),
                     "teacher_soft": (pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]).detach(),
+                    "hard_contrastive": (stage3_lambda * hard_term).detach(),
                     "pseudo_ce": (pseudo_ramp * args.lambda_pseudo * pseudo_loss).detach(),
                 }
                 family_totals_map = family_totals(family_values)
@@ -1458,6 +1485,7 @@ def run_epoch(
             "alignment_scale": source_loss.new_tensor(maturity_factor),
             "alignment_active_epochs": source_loss.new_tensor(alignment_active_epochs),
             "lmmd_scale": source_loss.new_tensor(effective_lmmd_lambda),
+            "hard": hard_term.detach(),
             "cred_mean": (
                 stage2_weights.mean().detach()
                 if stage2_weights is not None
@@ -1519,7 +1547,8 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "R1_DROP_SCALE_MI", "LOSS_ABL", "STAGE1_SWA", "STAGE1_STYLE",
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
-                        "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA")
+                        "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
+                        "STAGE3_HARD", "STAGE3_LAMBDA", "STAGE3_START", "STAGE3_MARGIN")
         },
     }
     return snapshot
