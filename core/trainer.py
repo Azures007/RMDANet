@@ -903,6 +903,25 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
         labels=source_train_labels,
         augment=True,
     )
+    # Optional diffusion generative augmentation (data-level only).
+    if os.environ.get("DIFFUSION_AUG", "").strip() == "1":
+        from diffusion_aug import build_synthetic_dataset
+
+        synthetic = build_synthetic_dataset(
+            source_scene.image,
+            source_train_coordinates,
+            source_train_labels,
+            target_image,
+            patch_size=int(args.patch_size),
+            num_classes=int(num_classes),
+            device=device,
+            seed=int(args.seed),
+            per_class=int(os.environ.get("DIFFUSION_PER_CLASS", "40")),
+            train_steps=int(os.environ.get("DIFFUSION_STEPS", "300")),
+        )
+        source_train_dataset = data.ConcatDataset([source_train_dataset, synthetic])
+        source_train_labels = np.concatenate([
+            source_train_labels, np.asarray(synthetic.labels, dtype=np.int64)])
     source_validation_dataset = (
         PatchDataset(
             source_scene.image,
