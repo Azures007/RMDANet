@@ -629,6 +629,21 @@ AA/Kappa（current）：1237 = 62.64/0.5091；1239 = 60.83/0.5122。
 - 审阅意见中"Center Pair 是第一删除候选"的假设**不被数据支持**；
 - 与 10.16 合并看：Prototype、Center Pair、Scale Pair **均保留**，最终配置维持 **14 项（四族）**；唯一的精简是论文呈现层（4 个损失函数）。
 
+## 10.18 v7.3 精简版（删除 4 项，14 → 11 项，待准确率验证）
+
+按审阅意见（"先不考虑准确率"）删除：外部 Center Pair、外部 Scale Pair、Prototype Alignment、Hard Contrastive（后者原本默认关闭）。
+
+| 项 | 变化 |
+|---|---|
+| L_align 子项 | 5 → 4（CCC、Source Metric、CORAL、class-mean alignment） |
+| L_cons 子项 | 5 → 3（Style Pair 复合损失、Scale MI、教师 soft） |
+| 合计加权子项 | 14 → **11** |
+| 论文口径 | 仍为 **4 个损失函数** |
+| 保留 | `memory.prototype_align_flagment_loss`、`core/hard_contrastive.py` 作为独立消融模块，不进入主训练 |
+| 版本 | v7.3-slim11；回滚点 tag `v7.2-advisor`（14 项版本） |
+
+**3 数据集 × 3 seed 准确率验证进行中，结果见 10.19（待补）。**
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。

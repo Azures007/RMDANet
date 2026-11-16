@@ -1,20 +1,16 @@
-RMDANet v7.2-advisor
-=====================
+RMDANet v7.3-slim11
+======================
 Built: 2026-11-16
-Rollback point: git tag pre-advisor-20261116 (commit d26c1f8)
+Rollback point: git tag v7.2-advisor (14-term version)
 
-Changes in v7.2:
-  - HyRANK canonical config: patch_size=5, pool_center_size=3 (verified 3 seeds, +2.53).
-  - Full training entry unified: HyRANK now uses bidirectional spectral fusion
-    (same as Pavia/Houston); the old label-free fusion-off rule is removed.
-  - MERGE_CONSISTENCY env removed (it had no real merge implementation).
-  - LOSS_PROFILE=compact (optional): folds external Scale Pair / Center Pair
-    into the composite style-consistency loss (top-level terms 14 -> 12).
-    Default remains "full"; equivalence must be verified per seed first.
-  - scripts/verify_run_config.py: checks run_config.json against canonical
-    per-dataset patch/centre/fusion and reports mismatches.
-  - Terminology: CCA -> CCC (Class-conditional Contrastive Alignment);
-    LMMD -> reliable class-mean alignment (linear-kernel MMD form).
-  - Hard Contrastive (STAGE3_HARD) stays disabled and is ablation-only.
+Changes in v7.3 (per review, accuracy ignored for this step):
+  - Removed external Center Pair and Scale Pair terms.
+  - Removed Prototype Alignment from the main training loss.
+  - Removed Hard Contrastive from the main training path
+    (kept as standalone ablation module core/hard_contrastive.py).
+  - Loss sub-terms: 14 -> 11 (L_sup 3, L_align 4, L_cons 3, L_self 1).
+  - Paper-level statement remains 4 loss functions.
+  - memory.prototype_align_flagment_loss is kept as an ablation module only.
+  - LOSS_PROFILE / STAGE3_* env switches removed from the training path.
 
-Prior package: RMDANet clean-v7 (2026-11-12, base commit 8151039).
+Prior version: v7.2-advisor (14 terms, HyRANK patch5/center3, unified full entry).

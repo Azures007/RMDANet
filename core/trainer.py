@@ -38,7 +38,6 @@ from loss_families import family_totals
 from v71_controls import (reliability_lmmd, maturity_snapshot, independent_spectral_view,
                           js_agreement)
 from credibility import coral_loss_weighted, target_credibility
-from hard_contrastive import hard_pair_contrastive
 
 
 
@@ -577,16 +576,8 @@ def style_pair_loss(
     source: ModelOutput,
     styled: ModelOutput,
     sample_weights: torch.Tensor,
-    extra_scale_weight: float = 0.0,
-    extra_center_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-    """Composite style-consistency loss (SKL + feature + scale + centre).
-
-    ``extra_scale_weight`` / ``extra_center_weight`` fold the former external
-    Scale Pair / Center Pair terms into this single composite loss
-    (``LOSS_PROFILE=compact``): the unweighted sample-average distances are
-    added with the same effective weights as before.
-    """
+    """Composite style-consistency loss (SKL + feature + scale + centre)."""
     source_probability = F.softmax(source.logits.float(), dim=1).clamp_min(1e-8)
     styled_probability = F.softmax(styled.logits.float(), dim=1).clamp_min(1e-8)
     symmetric_kl = 0.5 * (
@@ -604,10 +595,6 @@ def style_pair_loss(
         symmetric_kl + 0.60 * feature_distance + 0.25 * scale_distance + 0.15 * center_distance,
         sample_weights,
     )
-    if float(extra_scale_weight) != 0.0:
-        total = total + float(extra_scale_weight) * torch.mean(scale_distance)
-    if float(extra_center_weight) != 0.0:
-        total = total + float(extra_center_weight) * torch.mean(center_distance)
     return total, {
         "style_kl": weighted_mean(symmetric_kl, sample_weights),
         "style_feature": weighted_mean(feature_distance, sample_weights),
@@ -1191,28 +1178,9 @@ def run_epoch(
                     prat_metadata["sample_reliability"].to(device)
                     * (prat_metadata["sample_transfer"].to(device) + 0.01).sqrt()
                 ).clamp_min(1e-4)
-                # LOSS_PROFILE=compact: fold external Scale Pair / Center Pair
-                # into the composite style-consistency loss (14 -> 12 terms).
-                compact_consistency = os.environ.get("LOSS_PROFILE", "").strip().lower() == "compact"
-                if compact_consistency and args.lambda_style_pair > 0.0:
-                    extra_scale = args.lambda_scale_pair / args.lambda_style_pair
-                    extra_center = args.lambda_center_pair / args.lambda_style_pair
-                else:
-                    extra_scale = extra_center = 0.0
-                pair_loss, _ = style_pair_loss(
-                    source_output, styled_output, transfer_weight,
-                    extra_scale_weight=extra_scale, extra_center_weight=extra_center,
-                )
-                scale_pair = F.mse_loss(
-                    source_output.scale_weights.float(), styled_output.scale_weights.float()
-                )
-                center_pair = F.mse_loss(
-                    source_output.center_weights.float(), styled_output.center_weights.float()
-                )
+                pair_loss, _ = style_pair_loss(source_output, styled_output, transfer_weight)
             else:
                 pair_loss = source_loss.new_tensor(0.0)
-                scale_pair = source_loss.new_tensor(0.0)
-                center_pair = source_loss.new_tensor(0.0)
 
             scale_inputs = [source_output.scale_weights]
             if args.use_prat:
@@ -1325,38 +1293,11 @@ def run_epoch(
                 teacher_losses = teacher_consistency_losses(
                     strong_target_output, teacher_target, reliability_batch.reliability
                 )
-                proto_loss = (
-                    memory.prototype_align_flagment_loss(
-                        target_output.features,
-                        reliability_batch,
-                        min_confidence=float(getattr(args, "prototype_confidence", 0.95)),
-                        temperature=float(getattr(args, "prototype_temperature", 0.08)),
-                    )
-                    if prototype_align_flagment_enabled(args)
-                    else source_loss.new_tensor(0.0)
-                )
-                if prototype_align_flagment_enabled(args):
-                    proto_mask = (
-                        reliability_batch.stable_mask
-                        & reliability_batch.confidence.ge(
-                            float(getattr(args, "prototype_confidence", 0.95))
-                        )
-                    )
-                    if bool(memory.source_valid.any().item()):
-                        proto_mask = (
-                            proto_mask
-                            & memory.source_valid[reliability_batch.labels]
-                        )
-                    proto_used = proto_mask.float().sum()
-                else:
-                    proto_used = source_loss.new_tensor(0.0)
             else:
                 pseudo_loss = source_loss.new_tensor(0.0)
                 teacher_losses = {
                     "soft": source_loss.new_tensor(0.0),
                 }
-                proto_loss = source_loss.new_tensor(0.0)
-                proto_used = source_loss.new_tensor(0.0)
 
             lmmd_term = source_loss.new_tensor(0.0)
             if (
@@ -1413,36 +1354,6 @@ def run_epoch(
 
             cca_lambda *= maturity_factor
 
-            # Stage 3: hard-class cross-domain contrastive loss (docx 7.2).
-            stage3_hard = os.environ.get("STAGE3_HARD", "").strip() == "1"
-            stage3_lambda = float(os.environ.get("STAGE3_LAMBDA", "0.05"))
-            stage3_start = int(os.environ.get("STAGE3_START", "20"))
-            hard_term = source_loss.new_tensor(0.0)
-            if (
-                stage3_hard
-                and target_adaptation
-                and strong_target_output is not None
-                and reliability_batch is not None
-                and epoch >= stage3_start
-            ):
-                selected = reliability_batch.stable_mask & reliability_batch.confidence.ge(0.9)
-                if bool(selected.any()):
-                    ramp = min(1.0, (epoch - stage3_start + 1) / 10.0)
-                    hard_term = ramp * hard_pair_contrastive(
-                        strong_target_output.features[selected],
-                        reliability_batch.labels[selected],
-                        memory.source_prototypes,
-                        memory.source_valid,
-                        sample_weights=reliability_batch.reliability[selected],
-                        margin=float(os.environ.get("STAGE3_MARGIN", "0.3")),
-                    )
-
-            # Compact profile: external scale/centre terms are already folded
-            # into the composite style-consistency loss above.
-            _compact_profile = os.environ.get("LOSS_PROFILE", "").strip().lower() == "compact"
-            weighted_scale_pair = 0.0 if _compact_profile else (args.lambda_scale_pair if args.use_prat else 0.0)
-            weighted_center_pair = 0.0 if _compact_profile else (args.lambda_center_pair if args.use_prat else 0.0)
-
             total_loss = (
                 source_loss
                 + (args.lambda_style_supervision if args.use_prat else 0.0) * styled_supervision
@@ -1450,15 +1361,11 @@ def run_epoch(
                 + args.lambda_source_metric * metric_loss
                 + (args.lambda_style_pair if args.use_prat else 0.0) * pair_loss
                 + args.lambda_scale_mi * scale_mi
-                + weighted_scale_pair * scale_pair
-                + weighted_center_pair * center_pair
                 + effective_coral_lambda * coral_term
                 + effective_lmmd_lambda * lmmd_term
                 + cca_lambda * cca_loss
                 + pseudo_ramp * args.lambda_pseudo * pseudo_loss
                 + pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]
-                + pseudo_ramp * float(getattr(args, "prototype_weight", 0.05)) * proto_loss
-                + stage3_lambda * hard_term
             )
 
             # Paper-level four-family view (logging only; total_loss above is
@@ -1473,13 +1380,9 @@ def run_epoch(
                     "source_metric": (args.lambda_source_metric * metric_loss).detach(),
                     "coral": (effective_coral_lambda * coral_term).detach(),
                     "lmmd": (effective_lmmd_lambda * lmmd_term).detach(),
-                    "prototype": (pseudo_ramp * float(getattr(args, "prototype_weight", 0.05)) * proto_loss).detach(),
                     "style_pair": ((args.lambda_style_pair if args.use_prat else 0.0) * pair_loss).detach(),
-                    "scale_pair": (weighted_scale_pair * scale_pair).detach(),
-                    "center_pair": (weighted_center_pair * center_pair).detach(),
                     "scale_mi": (args.lambda_scale_mi * scale_mi).detach(),
                     "teacher_soft": (pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]).detach(),
-                    "hard_contrastive": (stage3_lambda * hard_term).detach(),
                     "pseudo_ce": (pseudo_ramp * args.lambda_pseudo * pseudo_loss).detach(),
                 }
                 family_totals_map = family_totals(family_values)
@@ -1507,15 +1410,12 @@ def run_epoch(
             "selected": reliability_batch.stable_mask.float().mean().detach(),
             "reliability": reliability_batch.reliability.mean().detach(),
             "transfer": prat_metadata["mean_transfer"].detach(),
-            "proto": proto_loss.detach(),
-            "proto_used": proto_used.detach(),
             "lmmd": lmmd_term.detach(),
             "cca": cca_loss.detach(),
             "maturity": source_loss.new_tensor(snapshot['maturity']),
             "alignment_scale": source_loss.new_tensor(maturity_factor),
             "alignment_active_epochs": source_loss.new_tensor(alignment_active_epochs),
             "lmmd_scale": source_loss.new_tensor(effective_lmmd_lambda),
-            "hard": hard_term.detach(),
             "cred_mean": (
                 stage2_weights.mean().detach()
                 if stage2_weights is not None
@@ -1539,7 +1439,7 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
     """Effective (post-override) configuration actually used by this run."""
     lambda_keys = (
         "lambda_style_supervision", "lambda_source_metric", "lambda_style_pair",
-        "lambda_scale_pair", "lambda_center_pair", "lambda_coral", "lambda_lmmd",
+        "lambda_coral", "lambda_lmmd",
         "lambda_cca", "lambda_pseudo", "lambda_soft_consistency", "lambda_scale_mi",
         "lambda_spectral_aux",
     )
@@ -1573,13 +1473,12 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         },
         "env": {
             key: os.environ.get(key, "")
-            for key in ("BACKBONE_VARIANT", "LOSS_PROFILE", "R1_LOSS",
+            for key in ("BACKBONE_VARIANT", "R1_LOSS",
                         "R1_DROP_SCALE_MI", "LOSS_ABL", "STAGE1_SWA", "STAGE1_STYLE",
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
-                        "STAGE3_HARD", "STAGE3_LAMBDA", "STAGE3_START", "STAGE3_MARGIN",
-                        "PATCH_SIZE_OVERRIDE", "LOSS_PROFILE")
+                        "PATCH_SIZE_OVERRIDE")
         },
     }
     return snapshot
@@ -1630,18 +1529,12 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         if part.strip()
     }
     if _loss_drop:
-        if "scale_pair" in _loss_drop:
-            args.lambda_scale_pair = 0.0
-        if "center_pair" in _loss_drop:
-            args.lambda_center_pair = 0.0
         if "source_metric" in _loss_drop:
             args.lambda_source_metric = 0.0
         if "soft_consistency" in _loss_drop:
             args.lambda_soft_consistency = 0.0
         if "cca" in _loss_drop:
             args.lambda_cca = 0.0
-        if "proto" in _loss_drop:
-            args.prototype_align_flag = False
         if "coral" in _loss_drop:
             args.lambda_coral = 0.0
         if "lmmd" in _loss_drop:
@@ -1813,10 +1706,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     )
     print(f"Ablation definition: {ABLATION_DESCRIPTIONS[args.ablation_id]}")
     if prototype_align_flagment_enabled(args):
-        print(
-            "Pavia prototype alignment ON: high-confidence target features are anchored "
-            f"to source class prototypes (weight={args.prototype_weight:.3f})"
-        )
+        print("Prototype alignment is disabled in v7.3 (removed per review).")
     print(
         f"bands={loaders['bands']} classes={loaders['num_classes']} "
         f"source_samples={loaders['source_samples']} target_samples={loaders['target_samples']}"
@@ -1880,8 +1770,6 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
                 f"epoch {epoch:03d}/{args.epochs} "
                 f"loss={metrics['loss']:.4f} sup={metrics['sup']:.4f} "
                 f"pseudo_eff={metrics['pseudo_effective']:.4f} pRamp={metrics['pseudo_ramp']:.2f} "
-                f"pProto={metrics.get('proto', 0.0):.4f} "
-                f"pN={metrics.get('proto_used', 0.0):.1f} "
                 f"LMMD={metrics['lmmd']:.4f} CCA={metrics['cca']:.4f} "
                 f"maturity={metrics['maturity']:.3f} align_gate={metrics['alignment_scale']:.2f} "
                 f"rel={metrics['reliability']:.3f} "
