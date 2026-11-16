@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+import os
+
 import h5py
 import numpy as np
 import torch
@@ -403,6 +405,14 @@ class PatchDataset(Dataset):
         return patch
     
     @staticmethod
+    def _edge_enhance(patch: np.ndarray, gain: float) -> np.ndarray:
+        """Unsharp masking: add a scaled high-frequency (edge) residual."""
+        padded = np.pad(patch, ((1, 1), (1, 1), (0, 0)), mode="edge").astype(np.float32)
+        horizontal = (padded[:-2] + 2.0 * padded[1:-1] + padded[2:]) * 0.25
+        blurred = (horizontal[:, :-2] + 2.0 * horizontal[:, 1:-1] + horizontal[:, 2:]) * 0.25
+        return (patch + float(gain) * (patch - blurred)).astype(np.float32)
+
+    @staticmethod
     def _frequency_augment(patch: np.ndarray) -> np.ndarray:
         """Fourier-domain perturbation for cross-scene robustness.
         
@@ -446,6 +456,8 @@ class PatchDataset(Dataset):
         patch = np.asarray(self.image[r0:r1, c0:c1], dtype=np.float32)
         if self.augment:
             patch = self._augment_patch(patch)
+        if os.environ.get("EDGE_ENHANCE", "").strip() == "1":
+            patch = self._edge_enhance(patch, float(os.environ.get("EDGE_GAIN", "0.3")))
         patch = np.ascontiguousarray(patch.transpose(2, 0, 1), dtype=np.float32)
         tensor = torch.from_numpy(patch)
         if self.labels is None:
