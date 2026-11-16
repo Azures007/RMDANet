@@ -614,6 +614,21 @@ AA/Kappa（current）：1237 = 62.64/0.5091；1239 = 60.83/0.5122。
 
 **结论：不删除 Prototype Alignment。** Pavia 与 HyRANK 均一致下降，HyRANK 在新配置下损失最大（−1.20），说明它在 patch5 + current 伪标签下仍有独立的类别原型判别作用；Houston 的 +0.14 在噪声内。**保留该损失，14 项配置不变。**
 
+## 10.17 Center / Scale Pair 单项删除（单 seed，均未采纳）
+
+配置：v7.2（HyRANK patch5/centre3、fusion 统一 bidirectional）；Pavia/Houston history，HyRANK current；seed1237。
+
+| 删除项 | Pavia | Houston | HyRANK | 判定 |
+|---|---|---|---|---|
+| Full（14 项） | 85.91 | 79.05 | 60.37 | — |
+| **仅删 Center Pair** | 84.90（**−1.01**） | 79.11（+0.06） | 58.94（**−1.43**） | 不删除 |
+| **仅删 Scale Pair** | 84.82（**−1.09**） | 79.25（+0.20） | 58.37（**−2.00**） | 不删除 |
+
+**结论：**
+- 两项在 Pavia 和 HyRANK 上单独删除都会明显掉点（−1 ~ −2），说明"外部均匀加权的 Scale/Center Pair"并非纯重复项，它确实提供了 PRAT 加权之外的稳定约束；
+- 审阅意见中"Center Pair 是第一删除候选"的假设**不被数据支持**；
+- 与 10.16 合并看：Prototype、Center Pair、Scale Pair **均保留**，最终配置维持 **14 项（四族）**；唯一的精简是论文呈现层（4 个损失函数）。
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。
