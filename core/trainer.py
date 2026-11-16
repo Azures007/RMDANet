@@ -21,6 +21,7 @@ from torch.utils import data
 
 from data import (
     PatchDataset,
+    compute_spectral_pca,
     align_target_bands,
     build_neighbor_ids,
     coordinates_from_mask,
@@ -878,7 +879,7 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     bands = int(source_scene.image.shape[-1])
 
     if os.environ.get("SPECTRAL_PCA", "").strip() not in ("", "0"):
-        data.compute_spectral_pca(
+        compute_spectral_pca(
             target_image, int(os.environ.get("SPECTRAL_PCA", "30")), seed=int(args.seed))
     target_mask_full = np.linalg.norm(target_image, axis=-1) > 0
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0.0)) != 0.0:
@@ -1042,7 +1043,7 @@ def build_target_evaluation_loader(
     coordinates = coordinates_from_mask(valid)
     labels = labels_at_coordinates(ground_truth, coordinates) - 1
     if os.environ.get("SPECTRAL_PCA", "").strip() not in ("", "0"):
-        data.compute_spectral_pca(
+        compute_spectral_pca(
             target_image, int(os.environ.get("SPECTRAL_PCA", "30")), seed=0)
     dataset = PatchDataset(
         target_image,
