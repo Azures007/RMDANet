@@ -590,6 +590,18 @@ AA/Kappa（current）：1237 = 62.64/0.5091；1239 = 60.83/0.5122。
 
 ---
 
+## 10.15 v7.2 配置统一与术语修正（2026-11-16）
+
+| 项 | 修改 |
+|---|---|
+| HyRANK 配置 | `datasets/hyrank/config.yaml`：`patch_size: 5`、`pool_center_size: 3`（3 seed 验证 +2.53） |
+| Full 入口统一 | `run_final_ablation.sh` 的 HyRANK 行改为 `bidirectional`（与 Pavia/Houston 相同）；原 "label-free fusion-off" 规则撤销 |
+| 移除 `MERGE_CONSISTENCY` | 该开关只出现在审计 env 记录里、无真实合并逻辑；v7.2 删除 |
+| 复合一致性（可选） | 新增 `LOSS_PROFILE=compact`：外部 Scale/Center Pair 折入 Style Pair（顶层 14→12），默认 full，需先验证等价性 |
+| 运行配置核对 | 新增 `scripts/verify_run_config.py`（按数据集检查 patch/centre/fusion/pseudo/loss_profile） |
+| 术语 | CCA → **CCC（Class-conditional Contrastive Alignment）**；LMMD → **reliable class-mean alignment（linear-kernel MMD 形式）**；Hard Contrastive 仅作消融 |
+| 回滚点 | git tag `pre-advisor-20261116` = commit `d26c1f8` |
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。

@@ -11,7 +11,7 @@ L = L_sup + λ₁ · L_align + λ₂ · L_cons + λ₃ · L_self
 | 损失族 | 含义 | 子项（代码不变） | 权重 |
 |---|---|---|---|
 | **L_sup** | 多视图监督 | 源域 CE、PRAT 风格化 CE、光谱辅助 CE | 1 / λ_style / λ_aux |
-| **L_align** | 类条件域对齐 | CCA、Source Metric、CORAL、LMMD、Prototype | λ_cca / λ_metric / λ_coral / λ_lmmd / λ_proto |
+| **L_align** | 类条件域对齐 | CCC（Class-conditional Contrastive Alignment，原 CCA）、Source Metric、CORAL、reliable class-mean alignment（linear-kernel MMD 形式，原 LMMD）、Prototype | λ_ccc / λ_metric / λ_coral / λ_lmmd / λ_proto |
 | **L_cons** | 一致性正则 | Style Pair、Scale Pair、Center Pair、Scale MI、教师 soft | λ_style_pair / λ_scale_pair / λ_center_pair / λ_scale_mi / λ_soft |
 | **L_self** | 自训练 | 加权伪标签 CE | λ_pseudo |
 
@@ -22,10 +22,10 @@ L = L_sup + λ₁ · L_align + λ₂ · L_cons + λ₃ · L_self
 | 1 | 源域 CE | L_sup | 源域分类主监督 |
 | 2 | PRAT 风格化 CE | L_sup | 风格迁移视图监督 |
 | 3 | 光谱辅助 CE | L_sup | 中心光谱分支辅助监督 |
-| 4 | CCA | L_align | 类条件原型对齐（hard-negative） |
+| 4 | CCC（原 CCA） | L_align | 类条件原型对比对齐（hard-negative；论文不写作 Canonical Correlation Analysis） |
 | 5 | Source Metric | L_align | 源域原型度量学习 |
 | 6 | CORAL | L_align | 二阶统计对齐 |
-| 7 | LMMD | L_align | 可靠性加权类条件均值对齐 |
+| 7 | reliable class-mean alignment（原 LMMD） | L_align | 可靠性加权类条件均值对齐（linear-kernel MMD 形式；与 DSAN 核 MMD 不同） |
 | 8 | Prototype | L_align | 可靠目标特征 → 源原型 |
 | 9 | Style Pair | L_cons | 源 vs 风格化源复合一致性 |
 | 10 | Scale Pair | L_cons | 尺度权重一致性 |
@@ -60,3 +60,12 @@ L = L_sup + λ₁ · L_align + λ₂ · L_cons + λ₃ · L_self
 | PCDM-UDA（JAG 2025） | 3 + 2 | 主阶段 3 项、微调 2 项 |
 
 > 代码实现：`core/loss_families.py` 提供四族聚合与日志（`[loss-families]`），训练总损失表达式与数值保持不变。
+
+## 6. 两项代码层精简（已实现，默认关闭其一）
+
+| 项 | 开关 | 说明 |
+|---|---|---|
+| 复合一致性损失 | `LOSS_PROFILE=compact` | 把外部 Scale Pair / Center Pair 折进 Style Pair 复合损失，顶层项 14 → **12**；与 Full 的数值等价性需逐 seed 验证后再设为默认 |
+| Hard Contrastive | `STAGE3_HARD=1` | 仅作消融/失败尝试保留，**不进入正式模型**（2 seed 净收益 ≈0） |
+
+> 早期草稿里的 `MERGE_CONSISTENCY` 开关已在 v7.2 中移除（只出现在审计 env 记录里、没有真实合并逻辑）。

@@ -577,7 +577,16 @@ def style_pair_loss(
     source: ModelOutput,
     styled: ModelOutput,
     sample_weights: torch.Tensor,
+    extra_scale_weight: float = 0.0,
+    extra_center_weight: float = 0.0,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Composite style-consistency loss (SKL + feature + scale + centre).
+
+    ``extra_scale_weight`` / ``extra_center_weight`` fold the former external
+    Scale Pair / Center Pair terms into this single composite loss
+    (``LOSS_PROFILE=compact``): the unweighted sample-average distances are
+    added with the same effective weights as before.
+    """
     source_probability = F.softmax(source.logits.float(), dim=1).clamp_min(1e-8)
     styled_probability = F.softmax(styled.logits.float(), dim=1).clamp_min(1e-8)
     symmetric_kl = 0.5 * (
@@ -595,6 +604,10 @@ def style_pair_loss(
         symmetric_kl + 0.60 * feature_distance + 0.25 * scale_distance + 0.15 * center_distance,
         sample_weights,
     )
+    if float(extra_scale_weight) != 0.0:
+        total = total + float(extra_scale_weight) * torch.mean(scale_distance)
+    if float(extra_center_weight) != 0.0:
+        total = total + float(extra_center_weight) * torch.mean(center_distance)
     return total, {
         "style_kl": weighted_mean(symmetric_kl, sample_weights),
         "style_feature": weighted_mean(feature_distance, sample_weights),
@@ -1178,7 +1191,18 @@ def run_epoch(
                     prat_metadata["sample_reliability"].to(device)
                     * (prat_metadata["sample_transfer"].to(device) + 0.01).sqrt()
                 ).clamp_min(1e-4)
-                pair_loss, _ = style_pair_loss(source_output, styled_output, transfer_weight)
+                # LOSS_PROFILE=compact: fold external Scale Pair / Center Pair
+                # into the composite style-consistency loss (14 -> 12 terms).
+                compact_consistency = os.environ.get("LOSS_PROFILE", "").strip().lower() == "compact"
+                if compact_consistency and args.lambda_style_pair > 0.0:
+                    extra_scale = args.lambda_scale_pair / args.lambda_style_pair
+                    extra_center = args.lambda_center_pair / args.lambda_style_pair
+                else:
+                    extra_scale = extra_center = 0.0
+                pair_loss, _ = style_pair_loss(
+                    source_output, styled_output, transfer_weight,
+                    extra_scale_weight=extra_scale, extra_center_weight=extra_center,
+                )
                 scale_pair = F.mse_loss(
                     source_output.scale_weights.float(), styled_output.scale_weights.float()
                 )
@@ -1413,6 +1437,12 @@ def run_epoch(
                         margin=float(os.environ.get("STAGE3_MARGIN", "0.3")),
                     )
 
+            # Compact profile: external scale/centre terms are already folded
+            # into the composite style-consistency loss above.
+            _compact_profile = os.environ.get("LOSS_PROFILE", "").strip().lower() == "compact"
+            weighted_scale_pair = 0.0 if _compact_profile else (args.lambda_scale_pair if args.use_prat else 0.0)
+            weighted_center_pair = 0.0 if _compact_profile else (args.lambda_center_pair if args.use_prat else 0.0)
+
             total_loss = (
                 source_loss
                 + (args.lambda_style_supervision if args.use_prat else 0.0) * styled_supervision
@@ -1420,8 +1450,8 @@ def run_epoch(
                 + args.lambda_source_metric * metric_loss
                 + (args.lambda_style_pair if args.use_prat else 0.0) * pair_loss
                 + args.lambda_scale_mi * scale_mi
-                + (args.lambda_scale_pair if args.use_prat else 0.0) * scale_pair
-                + (args.lambda_center_pair if args.use_prat else 0.0) * center_pair
+                + weighted_scale_pair * scale_pair
+                + weighted_center_pair * center_pair
                 + effective_coral_lambda * coral_term
                 + effective_lmmd_lambda * lmmd_term
                 + cca_lambda * cca_loss
@@ -1445,8 +1475,8 @@ def run_epoch(
                     "lmmd": (effective_lmmd_lambda * lmmd_term).detach(),
                     "prototype": (pseudo_ramp * float(getattr(args, "prototype_weight", 0.05)) * proto_loss).detach(),
                     "style_pair": ((args.lambda_style_pair if args.use_prat else 0.0) * pair_loss).detach(),
-                    "scale_pair": ((args.lambda_scale_pair if args.use_prat else 0.0) * scale_pair).detach(),
-                    "center_pair": ((args.lambda_center_pair if args.use_prat else 0.0) * center_pair).detach(),
+                    "scale_pair": (weighted_scale_pair * scale_pair).detach(),
+                    "center_pair": (weighted_center_pair * center_pair).detach(),
                     "scale_mi": (args.lambda_scale_mi * scale_mi).detach(),
                     "teacher_soft": (pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]).detach(),
                     "hard_contrastive": (stage3_lambda * hard_term).detach(),
@@ -1543,13 +1573,13 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
         },
         "env": {
             key: os.environ.get(key, "")
-            for key in ("BACKBONE_VARIANT", "MERGE_CONSISTENCY", "R1_LOSS",
+            for key in ("BACKBONE_VARIANT", "LOSS_PROFILE", "R1_LOSS",
                         "R1_DROP_SCALE_MI", "LOSS_ABL", "STAGE1_SWA", "STAGE1_STYLE",
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
                         "STAGE3_HARD", "STAGE3_LAMBDA", "STAGE3_START", "STAGE3_MARGIN",
-                        "PATCH_SIZE_OVERRIDE")
+                        "PATCH_SIZE_OVERRIDE", "LOSS_PROFILE")
         },
     }
     return snapshot

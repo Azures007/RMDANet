@@ -56,13 +56,15 @@ run_dataset pavia "$PAVIA_DATA" -4 "" \
   "drse_rftm 1 guided bidirectional 0" \
   "full 1 guided bidirectional 1"
 
-# HyRANK: fusion disabled by the label-free rule (target spectral-branch
-# confidence 0.599 < 0.65), alpha logit -3.5 (residual strength 0.029).
+# HyRANK: same entry as Pavia/Houston (bidirectional spectral fusion,
+# full row identical to the other two datasets). The earlier label-free
+# fusion-off rule was removed; patch 5x5 / centre 3 now come from
+# datasets/hyrank/config.yaml. alpha logit -3.5 (residual strength 0.029).
 run_dataset hyrank "$HYRANK_DATA" -3.5 "" \
   "base 0 gap off 0" \
-  "drse 0 guided off 0" \
-  "drse_rftm 1 guided off 0" \
-  "full 1 guided off 1"
+  "drse 0 guided bidirectional 0" \
+  "drse_rftm 1 guided bidirectional 0" \
+  "full 1 guided bidirectional 1"
 
 echo
 echo "================ FINAL SUMMARY ================"

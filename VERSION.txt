@@ -1,17 +1,20 @@
-RMDANet clean-v7 ablation package
-=================================
-Built: 2026-11-12
-Base commit: 8151039 (model: keep original module-creation order)
-Includes:
-  - DRSE naming fix: DRSE = Dual-branch Reliability Spectral-spatial Encoder
-    (DualReliabilityEncoder); RCGP = Residual Center-Guided Pooling (sub-module);
-    RSF = Reliability Spectral Fusion (sub-module).
-  - True DRSE-off switch: DualReliabilityEncoder(use_spectral_branch=False) and
-    ablate_4rows.py --abl-drse 0/1.
-  - Original module-creation order preserved for DRSE-on models, so results
-    from before the switch remain reproducible.
-  - run_drseoff_row.sh (single-branch DRSE-off rows).
-  - verify_code.py (structure check; run it after unzipping).
-  - Tooling env overrides (training/model code unchanged):
-      ABL_POOL_CENTER_SIZE   RCGP center window (default 5)
-      DRSE_ALPHA_LOGIT       residual alpha logit (default comes from config)
+RMDANet v7.2-advisor
+=====================
+Built: 2026-11-16
+Rollback point: git tag pre-advisor-20261116 (commit d26c1f8)
+
+Changes in v7.2:
+  - HyRANK canonical config: patch_size=5, pool_center_size=3 (verified 3 seeds, +2.53).
+  - Full training entry unified: HyRANK now uses bidirectional spectral fusion
+    (same as Pavia/Houston); the old label-free fusion-off rule is removed.
+  - MERGE_CONSISTENCY env removed (it had no real merge implementation).
+  - LOSS_PROFILE=compact (optional): folds external Scale Pair / Center Pair
+    into the composite style-consistency loss (top-level terms 14 -> 12).
+    Default remains "full"; equivalence must be verified per seed first.
+  - scripts/verify_run_config.py: checks run_config.json against canonical
+    per-dataset patch/centre/fusion and reports mismatches.
+  - Terminology: CCA -> CCC (Class-conditional Contrastive Alignment);
+    LMMD -> reliable class-mean alignment (linear-kernel MMD form).
+  - Hard Contrastive (STAGE3_HARD) stays disabled and is ablation-only.
+
+Prior package: RMDANet clean-v7 (2026-11-12, base commit 8151039).
