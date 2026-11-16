@@ -434,6 +434,60 @@ Tag：`results_ablation_clean/{ds}/{ds}_{soft_consistency,coral,lmmd,spectral_au
 
 ---
 
+## 10.11 Stage 0/1：运行入口审计与伪标签/归一化对照（2026-11-16）
+
+### Stage 0：入口一致性与配置落盘
+
+- 修复 `ablate_4rows.py` 的 `--row full`：原本 `fusion="off"`（光谱分支不参与主分类、`use_spectral_aux=False`），现改为 `fusion="bidirectional"`，与 trainer 的最终配置一致；修复后 Pavia seed1237 = **85.91 / 83.92 / 0.8305**，与显式参数基线完全一致。
+- 新增每次运行落盘 `run_config.json`：记录 fusion_mode、use_spectral_aux、pseudo_mode、patch_size、pool_alpha_logit、全部 loss λ、环境变量与审计告警。
+- 审计确认的无效开关（保留 CLI 兼容，但已打印告警）：
+  - `use_guard`：guard_model 创建但 `run_epoch()` 未使用；
+  - `use_confusion_loss`：总损失中无对应项；
+  - `use_time_score` / `use_feature_score` / `use_spatial_reliability`：memory 固定 3 分量，开关被忽略；
+  - `pseudo_min_per_class=0`：类别饥饿救援逻辑退出，`cempa_min_age/min_streak` 随之无效。
+- 单元测试 `tests/test_stage0_audit.py` 3 项通过。
+
+### Stage 1-A：HyRANK 伪标签路径（2 seed）
+
+| 配置 | seed1237 | seed1239 | 均值 | ΔOA |
+|---|---|---|---|---|
+| history（原基线） | 56.32 | 57.49 | 56.91 ± 0.59 | — |
+| **current** | **58.40** | **58.46** | **58.43 ± 0.03** | **+1.53** |
+
+AA/Kappa（current）：1237 = 62.64/0.5091；1239 = 60.83/0.5122。
+**结论：current 伪标签路径在 HyRANK 上稳定更优，应保留数据集自适应。**
+
+### Stage 1-B：HyRANK CORAL × LMMD（seed1237）
+
+| 配置 | OA | AA | Kappa | ΔOA |
+|---|---|---|---|---|
+| 基线 | 56.32 | 59.80 | 0.4870 | — |
+| 关 CORAL | 56.71 | 59.82 | 0.4904 | +0.39 |
+| 关 LMMD | 56.18 | 59.39 | 0.4844 | −0.14 |
+| 双关 | 56.50 | 59.86 | 0.4873 | +0.18 |
+
+**结论：仅"单关 CORAL"小幅正收益；LMMD 不可关；双关负交互。**
+
+### Stage 1-C：Pavia 归一化 × 幅值通道 2×2（seed1237）
+
+| 归一化 | amplitude | OA | AA | Kappa | ΔOA |
+|---|---|---|---|---|---|
+| L2 | off（基线） | 85.91 | 83.92 | 0.8305 | — |
+| L2 | on | 73.75 | 76.28 | 0.6869 | −12.16 |
+| median | off | 44.26 | 54.44 | 0.3464 | −41.65 |
+| median | on | 65.05 | 65.46 | 0.5757 | −20.86 |
+
+**结论：幅值通道与场景级 median 归一化均严重掉点，Pavia 依赖逐像素 L2 谱形；该改进方向否决。**
+
+### 代码开关
+
+- `PSEUDO_MODE_OVERRIDE=history|current|off`
+- `NORMALIZE_MODE_OVERRIDE=l2|median`
+- `AMPLITUDE_OVERRIDE=0|1`
+- 所有覆盖均在 ablation profile 之后应用，保证单变量对照。
+
+---
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。
