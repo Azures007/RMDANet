@@ -479,6 +479,25 @@ AA/Kappa（current）：1237 = 62.64/0.5091；1239 = 60.83/0.5122。
 
 **结论：幅值通道与场景级 median 归一化均严重掉点，Pavia 依赖逐像素 L2 谱形；该改进方向否决。**
 
+
+### Stage 1 收尾：伪标签路径的跨数据集验证（seed1237）
+
+| 数据集 | 配置 | OA | AA | Kappa | ΔOA |
+|---|---|---|---|---|---|
+| Pavia | history（基线） | 85.91 | 83.92 | 0.8305 | — |
+| Pavia | current | 70.15 | 71.28 | 0.6474 | −15.76 ❌ |
+| Houston | history（基线） | 79.05 | 82.48 | 0.6791 | — |
+| Houston | current | 78.79 | 82.99 | 0.6727 | −0.26 |
+| HyRANK | current（Stage1-A 最优） | 58.40 | 62.64 | 0.5091 | +2.08 |
+| HyRANK | current + 关 CORAL | 58.58 | 62.45 | 0.5096 | +0.18（vs current） |
+
+**结论：**
+1. `pseudo_mode=current` **不能全局开启**（Pavia −15.76），必须按数据集自适应：Pavia/Houston 用 history、HyRANK 用 current。这是目标标签无关的策略选择，不涉及目标 GT。
+2. HyRANK "current + 关 CORAL" 仅比 current 高 0.18（单 seed，噪声内），**不采用**；保留 CORAL。
+3. Stage 1 最终采纳：伪标签路径按数据集自适应（这是唯一稳定正收益 +1.53），其余 Stage 1 方案否决。
+
+---
+
 ### 代码开关
 
 - `PSEUDO_MODE_OVERRIDE=history|current|off`
