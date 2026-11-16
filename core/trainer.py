@@ -877,6 +877,9 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     num_classes = int(source_scene.ground_truth.max())
     bands = int(source_scene.image.shape[-1])
 
+    if os.environ.get("SPECTRAL_PCA", "").strip() not in ("", "0"):
+        data.compute_spectral_pca(
+            target_image, int(os.environ.get("SPECTRAL_PCA", "30")), seed=int(args.seed))
     target_mask_full = np.linalg.norm(target_image, axis=-1) > 0
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0.0)) != 0.0:
         raise RuntimeError("v7.1 strict UDA: target-GT training masks are forbidden")
@@ -1038,6 +1041,9 @@ def build_target_evaluation_loader(
     valid = (ground_truth > 0) & (np.linalg.norm(target_image, axis=-1) > 0)
     coordinates = coordinates_from_mask(valid)
     labels = labels_at_coordinates(ground_truth, coordinates) - 1
+    if os.environ.get("SPECTRAL_PCA", "").strip() not in ("", "0"):
+        data.compute_spectral_pca(
+            target_image, int(os.environ.get("SPECTRAL_PCA", "30")), seed=0)
     dataset = PatchDataset(
         target_image,
         coordinates,

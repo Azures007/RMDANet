@@ -25,6 +25,43 @@ HOUSTON_CLASS_NAMES = [
 
 
 @dataclass(frozen=True)
+_SPECTRAL_PCA_MEAN = None
+_SPECTRAL_PCA_COMPONENTS = None
+
+
+def set_spectral_pca(mean, components) -> None:
+    global _SPECTRAL_PCA_MEAN, _SPECTRAL_PCA_COMPONENTS
+    _SPECTRAL_PCA_MEAN = np.asarray(mean, dtype=np.float32)
+    _SPECTRAL_PCA_COMPONENTS = np.asarray(components, dtype=np.float32)
+
+
+def compute_spectral_pca(image: np.ndarray, num_components: int = 30,
+                         max_pixels: int = 20000, seed: int = 0) -> None:
+    """Unsupervised spectral PCA basis from the (unlabeled) target image."""
+    flat = np.asarray(image, dtype=np.float32).reshape(-1, image.shape[-1])
+    if flat.shape[0] > max_pixels:
+        rng = np.random.default_rng(seed)
+        flat = flat[rng.choice(flat.shape[0], max_pixels, replace=False)]
+    mean = flat.mean(axis=0, keepdims=True)
+    centered = flat - mean
+    covariance = centered.T @ centered / max(1, centered.shape[0])
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    order = np.argsort(eigenvalues)[::-1][: int(num_components)]
+    components = eigenvectors[:, order].T
+    set_spectral_pca(mean, components)
+    print(f"[spectral-pca] basis from target image: {components.shape[0]}/{image.shape[-1]} components")
+
+
+def _apply_spectral_pca(patch: np.ndarray) -> np.ndarray:
+    if _SPECTRAL_PCA_COMPONENTS is None or _SPECTRAL_PCA_MEAN is None:
+        return patch
+    shape = patch.shape
+    flat = patch.reshape(-1, shape[-1])
+    projected = (flat - _SPECTRAL_PCA_MEAN) @ _SPECTRAL_PCA_COMPONENTS.T
+    reconstructed = projected @ _SPECTRAL_PCA_COMPONENTS + _SPECTRAL_PCA_MEAN
+    return reconstructed.reshape(shape).astype(np.float32)
+
+
 class SceneData:
     image: np.ndarray
     ground_truth: np.ndarray | None
@@ -458,6 +495,7 @@ class PatchDataset(Dataset):
             patch = self._augment_patch(patch)
         if os.environ.get("EDGE_ENHANCE", "").strip() == "1":
             patch = self._edge_enhance(patch, float(os.environ.get("EDGE_GAIN", "0.3")))
+        patch = _apply_spectral_pca(patch)
         patch = np.ascontiguousarray(patch.transpose(2, 0, 1), dtype=np.float32)
         tensor = torch.from_numpy(patch)
         if self.labels is None:
