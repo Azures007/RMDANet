@@ -590,6 +590,30 @@ AA/Kappa（current）：1237 = 62.64/0.5091；1239 = 60.83/0.5122。
 
 ---
 
+## 10.15 v7.2 配置统一与术语修正（2026-11-16）
+
+| 项 | 修改 |
+|---|---|
+| HyRANK 配置 | `datasets/hyrank/config.yaml`：`patch_size: 5`、`pool_center_size: 3`（3 seed 验证 +2.53） |
+| Full 入口统一 | `run_final_ablation.sh` 的 HyRANK 行改为 `bidirectional`（与 Pavia/Houston 相同）；原 "label-free fusion-off" 规则撤销 |
+| 移除 `MERGE_CONSISTENCY` | 该开关只出现在审计 env 记录里、无真实合并逻辑；v7.2 删除 |
+| 复合一致性（可选） | 新增 `LOSS_PROFILE=compact`：外部 Scale/Center Pair 折入 Style Pair（顶层 14→12），默认 full，需先验证等价性 |
+| 运行配置核对 | 新增 `scripts/verify_run_config.py`（按数据集检查 patch/centre/fusion/pseudo/loss_profile） |
+| 术语 | CCA → **CCC（Class-conditional Contrastive Alignment）**；LMMD → **reliable class-mean alignment（linear-kernel MMD 形式）**；Hard Contrastive 仅作消融 |
+| 回滚点 | git tag `pre-advisor-20261116` = commit `d26c1f8` |
+
+## 10.16 Prototype Alignment 删除验证（3 seed，v7.2 配置，未采纳删除）
+
+配置：`LOSS_ABL=proto`；Pavia/Houston patch7 + history 伪标签，HyRANK patch5 + current 伪标签，fusion 统一 bidirectional。
+
+| 数据集 | Full（3 seed） | 删除 Prototype（3 seed） | 3-seed 均值 ΔOA |
+|---|---|---|---|
+| Pavia | 85.91 / 86.06 / 85.07（85.68） | 85.74 / 85.83 / 84.77（85.45） | **−0.23** |
+| Houston | 79.05 / 79.13 / 77.52（78.57） | 79.13 / 79.33 / 77.66（78.71） | +0.14 |
+| HyRANK | 60.37 / 62.90 / 59.08（60.78） | 59.50 / 61.13 / 58.13（59.59） | **−1.20** |
+
+**结论：不删除 Prototype Alignment。** Pavia 与 HyRANK 均一致下降，HyRANK 在新配置下损失最大（−1.20），说明它在 patch5 + current 伪标签下仍有独立的类别原型判别作用；Houston 的 +0.14 在噪声内。**保留该损失，14 项配置不变。**
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。
