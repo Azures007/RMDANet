@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Combined ablation for the clean v7.0 build.
 
-Presets (--row):
-  base      prat0 pool=gap    fusion=off      rtml0
-  drse      prat0 pool=guided fusion=reliable rtml0
-  rftm      prat1 pool=gap    fusion=off      rtml0
-  drse_rftm prat1 pool=guided fusion=reliable rtml0
-  full      prat1 pool=guided fusion=reliable rtml1
+Presets (--row).  ``full`` must equal the released final configuration:
+  base      prat0 pool=gap    fusion=off          rtml0
+  drse      prat0 pool=guided fusion=off          rtml0  (legacy row: keeps the
+                                                        historical fusion=off)
+  rftm      prat1 pool=gap    fusion=off          rtml0
+  drse_rftm prat1 pool=guided fusion=off          rtml0  (legacy row)
+  full      prat1 pool=guided fusion=bidirectional rtml1 (released final model)
 
 Arbitrary combination (--tag NAME --prat 0/1 --pool guided/gap
-                        --fusion reliable/off --rtml 0/1)
+                        --fusion reliable/bidirectional/off --rtml 0/1)
 """
 import argparse
 import os
@@ -29,7 +30,7 @@ ROWS = {
     "drse":      dict(prat=0, pool="guided", fusion="off", rtml=0),
     "rftm":      dict(prat=1, pool="gap",    fusion="off", rtml=0),
     "drse_rftm": dict(prat=1, pool="guided", fusion="off", rtml=0),
-    "full":      dict(prat=1, pool="guided", fusion="off", rtml=1),
+    "full":      dict(prat=1, pool="guided", fusion="bidirectional", rtml=1),
 }
 
 _orig_apply = trainer.apply_ablation_profile

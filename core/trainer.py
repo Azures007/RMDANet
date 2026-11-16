@@ -1435,6 +1435,86 @@ def run_epoch(
     })
     return metrics
 
+def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    """Effective (post-override) configuration actually used by this run."""
+    lambda_keys = (
+        "lambda_style_supervision", "lambda_source_metric", "lambda_style_pair",
+        "lambda_scale_pair", "lambda_center_pair", "lambda_coral", "lambda_lmmd",
+        "lambda_cca", "lambda_pseudo", "lambda_soft_consistency", "lambda_scale_mi",
+        "lambda_spectral_aux",
+    )
+    snapshot: dict[str, Any] = {
+        "ablation_id": str(getattr(args, "ablation_id", "")),
+        "run_name": str(getattr(args, "run_name", "")),
+        "dataset_pair": f"{getattr(args, 'source_name', '')}->{getattr(args, 'target_name', '')}",
+        "seed": int(getattr(args, "seed", 0)),
+        "patch_size": int(getattr(args, "patch_size", 0)),
+        "spectral_fusion_mode": str(getattr(args, "spectral_fusion_mode", "")),
+        "use_spectral_branch": bool(getattr(args, "use_spectral_branch", True)),
+        "use_spectral_aux": bool(getattr(args, "use_spectral_aux", False)),
+        "use_prat": bool(getattr(args, "use_prat", False)),
+        "pseudo_mode": str(getattr(args, "pseudo_mode", "")),
+        "use_probability_history": bool(getattr(args, "use_probability_history", False)),
+        "pooling_mode": str(getattr(args, "pooling_mode", "")),
+        "pool_center_size": int(getattr(args, "pool_center_size", 0)),
+        "pool_alpha_logit": float(getattr(args, "pool_alpha_logit", 0.0)),
+        "epochs": int(getattr(args, "epochs", 0)),
+        "steps_per_epoch": int(getattr(args, "steps_per_epoch", 0)),
+        "batch_size": int(getattr(args, "batch_size", 0)),
+        "source_samples_per_class": int(getattr(args, "source_samples_per_class", 0)),
+        "source_train_ratio": float(getattr(args, "source_train_ratio", 0.0)),
+        "source_budget_train_fraction": float(getattr(args, "source_budget_train_fraction", 0.0)),
+        "loss_lambdas": {key: float(getattr(args, key, 0.0)) for key in lambda_keys},
+        "switches": {
+            key: bool(getattr(args, key, False))
+            for key in ("use_guard", "use_confusion_loss", "use_time_score",
+                        "use_feature_score", "use_spatial_reliability",
+                        "use_ema_teacher", "use_prat")
+        },
+        "env": {
+            key: os.environ.get(key, "")
+            for key in ("BACKBONE_VARIANT", "MERGE_CONSISTENCY", "R1_LOSS",
+                        "R1_DROP_SCALE_MI", "LOSS_ABL", "STAGE1_SWA", "STAGE1_STYLE",
+                        "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED")
+        },
+    }
+    return snapshot
+
+
+# Flags that were once wired to the objective but are now no-ops.  Kept in the
+# CLI for backward compatibility; the audit below makes this explicit.
+_NOOP_SWITCH_REASONS = {
+    "use_guard": "guard_model is created but never used inside run_epoch()",
+    "use_confusion_loss": "no confusion-loss term exists in the total objective",
+    "use_time_score": "memory.update() always uses 3 components (conf/view/spatial)",
+    "use_feature_score": "memory.update() always uses 3 components (conf/view/spatial)",
+    "use_spatial_reliability": "spatial component is always on; flag is ignored",
+}
+
+
+def audit_runtime_config(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
+    """Write run_config.json and warn about no-op switches (Stage-0 audit)."""
+    snapshot = effective_config_snapshot(args)
+    warnings = [
+        f"{flag} is set but has no effect: {reason}"
+        for flag, reason in _NOOP_SWITCH_REASONS.items()
+        if bool(getattr(args, flag, False))
+    ]
+    if int(getattr(args, "pseudo_min_per_class", 0)) <= 0:
+        warnings.append("pseudo_min_per_class=0: class-starvation rescue is disabled "
+                        "(cempa_min_age / cempa_min_streak have no effect)")
+    snapshot["audit_warnings"] = warnings
+    (run_dir / "run_config.json").write_text(
+        json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    print(f"[audit] effective fusion={snapshot['spectral_fusion_mode']} "
+          f"spectral_aux={snapshot['use_spectral_aux']} pseudo_mode={snapshot['pseudo_mode']} "
+          f"patch={snapshot['patch_size']} pool_alpha={snapshot['pool_alpha_logit']}")
+    for warning in warnings:
+        print(f"[audit][WARN] {warning}")
+    return snapshot
+
+
 def train(args: argparse.Namespace) -> dict[str, Any]:
     args = apply_ablation_profile(args)
     # Tooling-only loss ablation (does not affect the default configuration).
@@ -1499,6 +1579,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     (run_dir / "training_config.json").write_text(
         json.dumps(vars(args), ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    audit_runtime_config(args, run_dir)
 
     loaders = build_loaders(args, device)
     diagnostic_target_loader = None  # fail-closed; target GT only in locked evaluation
