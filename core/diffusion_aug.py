@@ -92,7 +92,7 @@ class SyntheticPatchDataset(Dataset):
 
     def __getitem__(self, index: int):
         patch = np.ascontiguousarray(self.cubes[index].transpose(2, 0, 1), dtype=np.float32)
-        return torch.from_numpy(patch), int(self.labels[index])
+        return torch.from_numpy(patch), torch.tensor(self.labels[index], dtype=torch.long)
 
 
 def build_synthetic_dataset(
