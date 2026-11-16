@@ -37,6 +37,7 @@ from prat import PhaseReliabilityResidualAmplitudeTransfer
 from loss_families import family_totals
 from v71_controls import (reliability_lmmd, maturity_snapshot, independent_spectral_view,
                           js_agreement)
+from credibility import coral_loss_weighted, target_credibility
 
 
 
@@ -1256,6 +1257,28 @@ def run_epoch(
                     source_output.features.detach(),
                 )
 
+        # Stage 2: target-domain credibility (no target GT), used as a soft
+        # weight for CORAL / LMMD / CCA.  Warm-up keeps w == 1 early on.
+        stage2_gating = os.environ.get("STAGE2_GATING") == "1"
+        stage2_weights = None
+        if (
+            stage2_gating
+            and target_adaptation
+            and teacher_target is not None
+            and reliability_batch is not None
+            and reliability_batch.labels.numel() > 0
+        ):
+            with torch.no_grad():
+                stage2_weights = target_credibility(
+                    teacher_target.features,
+                    memory.source_prototypes,
+                    memory.source_valid,
+                    reliability_batch.confidence,
+                    reliability_batch.reliability,
+                    epoch=epoch,
+                    warmup_epochs=int(os.environ.get("STAGE2_WARMUP", "10")),
+                )
+
         with autocast_context(device, args.amp):
             metric_loss = source_metric_loss(
                 source_output.features,
@@ -1318,10 +1341,15 @@ def run_epoch(
                     source_output.features, source_y, target_output.features,
                     reliability_batch.labels, reliability_batch.stable_mask,
                     reliability_batch.reliability, memory.num_classes,
-                    min_samples=int(args.lmmd_min_samples))
+                    min_samples=int(args.lmmd_min_samples),
+                    extra_weights=stage2_weights)
             coral_term = source_loss.new_tensor(0.0)
             if args.lambda_coral > 0.0 and maturity_factor > 0.0 and target_adaptation and target_output is not None:
-                coral_term = coral_loss(source_output.features, target_output.features)
+                coral_term = (
+                    coral_loss_weighted(source_output.features, target_output.features, stage2_weights)
+                    if stage2_weights is not None
+                    else coral_loss(source_output.features, target_output.features)
+                )
             # Label-free maturity and warmup gates are applied to all aligners.
             lmmd_time = (alignment_active_epochs if args.align_maturity_gate
                          else epoch - args.lmmd_start_epoch + 1)
@@ -1343,6 +1371,7 @@ def run_epoch(
                 cca_loss = memory.class_conditional_alignment(
                     strong_target_output.features,
                     temperature=float(args.cca_temperature),
+                    sample_weights=stage2_weights,
                 )
                 # CCA warm-up: 从 0 线性升到 lambda_cca
                 warm = int(getattr(args, "cca_warm_epochs", 0))
@@ -1423,6 +1452,11 @@ def run_epoch(
             "alignment_scale": source_loss.new_tensor(maturity_factor),
             "alignment_active_epochs": source_loss.new_tensor(alignment_active_epochs),
             "lmmd_scale": source_loss.new_tensor(effective_lmmd_lambda),
+            "cred_mean": (
+                stage2_weights.mean().detach()
+                if stage2_weights is not None
+                else source_loss.new_tensor(0.0)
+            ),
             **{name: value.detach() for name, value in family_totals_map.items()},
         }
         for key, value in batch_values.items():

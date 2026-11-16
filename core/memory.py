@@ -394,7 +394,8 @@ class ReliabilityPrototypeMemory:
         return consensus, spatial_score, support
 
     def class_conditional_alignment(
-        self, target_features: torch.Tensor, temperature: float = 0.10
+        self, target_features: torch.Tensor, temperature: float = 0.10,
+        sample_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Soft-assignment class-conditional alignment.
 
@@ -402,6 +403,8 @@ class ReliabilityPrototypeMemory:
         target features with their softmax similarity to source prototype c.
         Pull source prototype c and target soft prototype c together, push
         source prototype c away from the most similar wrong-class target proto.
+        ``sample_weights`` (Stage 2 credibility) down-weights untrusted target
+        samples; when None the behaviour is identical to the baseline.
         """
         if not bool(self.source_valid.all().item()):
             return target_features.new_tensor(0.0)
@@ -409,6 +412,9 @@ class ReliabilityPrototypeMemory:
         protos = F.normalize(self.source_prototypes.float(), dim=1)
         sim = f @ protos.t() / max(float(temperature), 1e-4)   # [N, C]
         soft = F.softmax(sim, dim=1)                            # [N, C]
+        if sample_weights is not None:
+            weight = sample_weights.float().clamp_min(0.0).view(-1, 1)
+            soft = soft * weight
         tgt_protos = soft.t() @ f                               # [C, D]
         tgt_protos = F.normalize(tgt_protos, dim=1)
         pos = (protos * tgt_protos).sum(dim=1)                  # [C]

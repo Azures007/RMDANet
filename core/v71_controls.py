@@ -11,14 +11,17 @@ import torch.nn.functional as F
 
 def reliability_lmmd(source_features, source_labels, target_features,
                      target_labels, stable_mask, reliability, num_classes,
-                     min_samples=2, min_effective=1.5):
+                     min_samples=2, min_effective=1.5, extra_weights=None):
     """Source-vs-reliable-target class-conditional mean alignment.
 
     Skips a class with inadequate reliable support; NEVER falls back to all
     predicted labels. The pseudo labels are still noisy estimates.
+    ``extra_weights`` (Stage 2 credibility) multiplies the per-sample weights.
     """
     sf, tf = source_features.float(), target_features.float()
     weights = reliability.detach().float().clamp(0, 1) * stable_mask.detach().float()
+    if extra_weights is not None:
+        weights = weights * extra_weights.detach().float().clamp(0, 1)
     total = sf.sum() * 0.0
     used = 0
     for c in range(num_classes):
