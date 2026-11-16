@@ -34,6 +34,7 @@ from data import (
 from memory import ReliabilityPrototypeMemory
 from model import DualReliabilityEncoder, ModelOutput
 from prat import PhaseReliabilityResidualAmplitudeTransfer
+from loss_families import family_report
 from v71_controls import (reliability_lmmd, maturity_snapshot, independent_spectral_view,
                           js_agreement)
 
@@ -1366,6 +1367,27 @@ def run_epoch(
                 + pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]
                 + pseudo_ramp * float(getattr(args, "prototype_weight", 0.05)) * proto_loss
             )
+
+            # Paper-level four-family view (logging only; total_loss above is
+            # numerically unchanged, so accuracy is identical).
+            if epoch in (1, args.epochs):
+                family_values = {
+                    "source_ce": source_loss.detach(),
+                    "prat_styled_ce": ((args.lambda_style_supervision if args.use_prat else 0.0) * styled_supervision).detach(),
+                    "spectral_aux_ce": (args.lambda_spectral_aux * spectral_aux).detach(),
+                    "cca": (cca_lambda * cca_loss).detach(),
+                    "source_metric": (args.lambda_source_metric * metric_loss).detach(),
+                    "coral": (effective_coral_lambda * coral_term).detach(),
+                    "lmmd": (effective_lmmd_lambda * lmmd_term).detach(),
+                    "prototype": (pseudo_ramp * float(getattr(args, "prototype_weight", 0.05)) * proto_loss).detach(),
+                    "style_pair": ((args.lambda_style_pair if args.use_prat else 0.0) * pair_loss).detach(),
+                    "scale_pair": ((args.lambda_scale_pair if args.use_prat else 0.0) * scale_pair).detach(),
+                    "center_pair": ((args.lambda_center_pair if args.use_prat else 0.0) * center_pair).detach(),
+                    "scale_mi": (args.lambda_scale_mi * scale_mi).detach(),
+                    "teacher_soft": (pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]).detach(),
+                    "pseudo_ce": (pseudo_ramp * args.lambda_pseudo * pseudo_loss).detach(),
+                }
+                print(family_report(family_values))
 
         scaler.scale(total_loss).backward()
         scaler.unscale_(optimizer)
