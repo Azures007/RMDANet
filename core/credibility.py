@@ -29,8 +29,15 @@ def target_credibility(
     warmup_epochs: int = 10,
     margin_center: float = 0.05,
     margin_sharpness: float = 6.0,
+    mode: str = "full",
+    beta: float = 1.0,
 ) -> torch.Tensor:
-    """Return per-target-sample credibility in [0, 1] (detached)."""
+    """Return per-target-sample credibility in [0, 1] (detached).
+
+    mode="full"  : geometric mean of prototype margin, confidence, reliability.
+    mode="proto" : prototype margin only (Stage-2b soft variant).
+    beta         : maximum down-weighting, w' = 1 - beta * (1 - w).
+    """
     if target_features.numel() == 0:
         return target_features.new_zeros(target_features.size(0))
     f = F.normalize(target_features.float(), dim=1)
@@ -42,14 +49,18 @@ def target_credibility(
     top = sim.topk(k, dim=1).values
     margin = top[:, 0] - top[:, 1] if k > 1 else top[:, 0]
     s_proto = torch.sigmoid(margin_sharpness * (margin - margin_center))
-    s_conf = confidence.float().clamp(0.0, 1.0)
-    s_rel = reliability.float().clamp(0.0, 1.0)
-    weight = (s_proto.clamp_min(1e-6) * s_conf.clamp_min(1e-6) * s_rel.clamp_min(1e-6)).pow(1.0 / 3.0)
+    if mode == "proto":
+        weight = s_proto
+    else:
+        s_conf = confidence.float().clamp(0.0, 1.0)
+        s_rel = reliability.float().clamp(0.0, 1.0)
+        weight = (s_proto.clamp_min(1e-6) * s_conf.clamp_min(1e-6) * s_rel.clamp_min(1e-6)).pow(1.0 / 3.0)
     if warmup_epochs > 0:
         progress = min(1.0, max(0.0, float(epoch) / float(max(1, warmup_epochs))))
     else:
         progress = 1.0
     weight = (1.0 - progress) + progress * weight
+    weight = 1.0 - float(beta) * (1.0 - weight)
     return weight.detach()
 
 

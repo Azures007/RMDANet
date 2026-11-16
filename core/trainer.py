@@ -1259,7 +1259,11 @@ def run_epoch(
 
         # Stage 2: target-domain credibility (no target GT), used as a soft
         # weight for CORAL / LMMD / CCA.  Warm-up keeps w == 1 early on.
-        stage2_gating = os.environ.get("STAGE2_GATING") == "1"
+        # STAGE2_GATING=1 -> full signals (conf x view x spatial x proto margin)
+        # STAGE2_GATING=2 -> Stage-2b: prototype margin only, max downweight beta,
+        #                    applied to CORAL + CCA only (not LMMD).
+        stage2_mode = os.environ.get("STAGE2_GATING", "").strip()
+        stage2_gating = stage2_mode in ("1", "2")
         stage2_weights = None
         if (
             stage2_gating
@@ -1277,6 +1281,8 @@ def run_epoch(
                     reliability_batch.reliability,
                     epoch=epoch,
                     warmup_epochs=int(os.environ.get("STAGE2_WARMUP", "10")),
+                    mode=("proto" if stage2_mode == "2" else "full"),
+                    beta=float(os.environ.get("STAGE2_BETA", "0.25" if stage2_mode == "2" else "1.0")),
                 )
 
         with autocast_context(device, args.amp):
@@ -1342,7 +1348,7 @@ def run_epoch(
                     reliability_batch.labels, reliability_batch.stable_mask,
                     reliability_batch.reliability, memory.num_classes,
                     min_samples=int(args.lmmd_min_samples),
-                    extra_weights=stage2_weights)
+                    extra_weights=(stage2_weights if stage2_mode == "1" else None))
             coral_term = source_loss.new_tensor(0.0)
             if args.lambda_coral > 0.0 and maturity_factor > 0.0 and target_adaptation and target_output is not None:
                 coral_term = (
@@ -1513,7 +1519,7 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "R1_DROP_SCALE_MI", "LOSS_ABL", "STAGE1_SWA", "STAGE1_STYLE",
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
-                        "STAGE2_GATING", "STAGE2_WARMUP")
+                        "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA")
         },
     }
     return snapshot
