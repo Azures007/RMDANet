@@ -1548,7 +1548,8 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
-                        "STAGE3_HARD", "STAGE3_LAMBDA", "STAGE3_START", "STAGE3_MARGIN")
+                        "STAGE3_HARD", "STAGE3_LAMBDA", "STAGE3_START", "STAGE3_MARGIN",
+                        "PATCH_SIZE_OVERRIDE")
         },
     }
     return snapshot
@@ -1640,6 +1641,19 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     if _amplitude_override in ("0", "1"):
         args.amplitude_channel = _amplitude_override == "1"
         print(f"[stage1] amplitude_channel override -> {args.amplitude_channel}")
+    # Patch-size experiment (docx 3.4 / 4.3). CenterGuidedPooling window is
+    # adapted to the patch: 3->1 (centre pixel), 5->3, >=7->5, so the centre
+    # descriptor does not degenerate into global average pooling.
+    _patch_override = os.environ.get("PATCH_SIZE_OVERRIDE", "").strip()
+    if _patch_override:
+        patch = int(_patch_override)
+        if patch < 3 or patch % 2 != 1:
+            raise ValueError("PATCH_SIZE_OVERRIDE must be an odd integer >= 3")
+        args.patch_size = patch
+        if not os.environ.get("ABL_POOL_CENTER_SIZE"):
+            args.pool_center_size = 1 if patch == 3 else min(5, patch)
+        print(f"[stage4] patch_size override -> {patch} "
+              f"(pool_center_size={args.pool_center_size})")
     if getattr(args, "use_gt_target_mask", False) or float(getattr(args, "target_gt_mix_ratio", 0)) != 0 or args.diagnostic_target_oa:
         raise RuntimeError("v7.1 training forbids all target GT access and in-training OA diagnostics")
     if not getattr(args, "skip_final_evaluation", True):
