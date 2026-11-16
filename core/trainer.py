@@ -38,6 +38,7 @@ from loss_families import family_totals
 from v71_controls import (reliability_lmmd, maturity_snapshot, independent_spectral_view,
                           js_agreement)
 from credibility import coral_loss_weighted, target_credibility
+from open_set import sinkhorn_assignment
 
 
 
@@ -1204,6 +1205,7 @@ def run_epoch(
                 torch.cat(prototype_labels, dim=0),
             )
 
+            open_set_unknown = None
             if target_adaptation:
                 assert target_output is not None and strong_target_output is not None
                 assert teacher_target is not None and teacher_probability is not None
@@ -1242,6 +1244,23 @@ def run_epoch(
                             reliability_batch.reliability = (
                                 reliability_batch.reliability *
                                 (0.4 + 0.6 * agreement_score).detach())
+                # P0: open-set virtual-class assignment (Sinkhorn with dustbin).
+                # Unknown-class target samples are removed from pseudo supervision
+                # instead of being forced into a shared class.
+                if os.environ.get("OPEN_SET_OT", "").strip() == "1":
+                    frac = float(os.environ.get("OPEN_SET_FRAC", "0.1"))
+                    if frac > 0.0:
+                        with torch.no_grad():
+                            teacher_log_prob = torch.log(
+                                teacher_probability.float().clamp_min(1e-8))
+                            assignment, unknown_mask = sinkhorn_assignment(
+                                teacher_log_prob,
+                                unknown_frac=frac,
+                                temperature=float(os.environ.get("OPEN_SET_TAU", "0.05")),
+                            )
+                            reliability_batch.stable_mask = (
+                                reliability_batch.stable_mask & (~unknown_mask))
+                            open_set_unknown = unknown_mask.float().mean()
             else:
                 fallback_probability = F.softmax(source_output.logits.detach().float(), dim=1)
                 reliability_batch = memory.empty_batch(
@@ -1416,6 +1435,11 @@ def run_epoch(
             "alignment_scale": source_loss.new_tensor(maturity_factor),
             "alignment_active_epochs": source_loss.new_tensor(alignment_active_epochs),
             "lmmd_scale": source_loss.new_tensor(effective_lmmd_lambda),
+            "unknown": (
+                open_set_unknown.detach()
+                if open_set_unknown is not None
+                else source_loss.new_tensor(0.0)
+            ),
             "cred_mean": (
                 stage2_weights.mean().detach()
                 if stage2_weights is not None
@@ -1478,7 +1502,7 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
-                        "PATCH_SIZE_OVERRIDE")
+                        "PATCH_SIZE_OVERRIDE", "OPEN_SET_OT", "OPEN_SET_FRAC", "OPEN_SET_TAU")
         },
     }
     return snapshot
