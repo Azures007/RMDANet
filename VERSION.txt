@@ -1,20 +1,21 @@
-RMDANet v7.6-p4p2p10t
-========================
+RMDANet v7.7-p4p2p10tent
+==========================
 Built: 2026-11-17
 Base: v7.3-slim11 (11 weighted loss sub-terms, 4 loss families)
 
-Inference protocol (per dataset defaults, --sliding):
-  - Pavia:  temperature 1.0, sliding radius 2 (5x5 = 25 views)
-  - Houston: temperature 1.5, sliding radius 2
-  - HyRANK: temperature 1.5, sliding radius 1 (3x3 = 9 views)
+Inference protocol (locked eval, --sliding):
+  - Pavia:   temperature 1.0, sliding radius 2 (25 views), TENT off
+  - Houston: temperature 1.5, sliding radius 2 (25 views), TENT off
+  - HyRANK:  temperature 1.5, sliding radius 1 (9 views),  TENT on
+             (BatchNorm-affine entropy minimization on unlabeled target,
+              TENT_STEPS=50, TENT_LR=1e-3; override with TENT=0/1)
   Override with EVAL_TEMPERATURE / SLIDING_RADIUS.
 
-Results (v7.6, 2 seeds for Pavia, 1 seed for Houston/HyRANK):
-  - Pavia: 87.13 / 87.01 -> 87.07
+Results (v7.7; Pavia/HyRANK 3 seeds, Houston 1 seed):
+  - Pavia:   86.66 (87.13 / 87.01 / 85.85)
   - Houston: 82.88
-  - HyRANK: 61.67
+  - HyRANK:  63.34 +- 0.47 (62.39 / 64.47 / 62.98)
 
-Base improvements: P4 (prototype filter) + P2 (prior calibration) + P10 (sliding).
-All other report proposals (loss reweighting, quota, low-freq, AdaBN, Platt,
-MC-dropout, multi-scale patch, curriculum, 256-dim, open-set) were tested and
-rejected (see docs 10.42-10.53).
+Base improvements: P4 (prototype filter) + P2 (prior calibration) + P10 (sliding)
++ temperature scaling + TENT (HyRANK). All other proposals tested and rejected
+(see docs 10.42-10.58).

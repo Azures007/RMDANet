@@ -103,7 +103,12 @@ def main():
                 for batch in loader:
                     model(batch[0].to(device,non_blocking=True))
         model.eval()
-    if os.environ.get("TENT", "").strip() == "1":
+    _tent_env = os.environ.get("TENT", "").strip().lower()
+    if _tent_env == "":
+        tent_enabled = str(getattr(t, "dataset", "")).lower() == "hyrank"
+    else:
+        tent_enabled = _tent_env in ("1", "true", "yes")
+    if tent_enabled:
         # Test-time entropy minimization: adapt only BatchNorm affine params/stats
         # on unlabeled target data (no target GT used).
         bn_params = []
