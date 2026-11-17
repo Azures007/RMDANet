@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import math
 from dataclasses import dataclass
 
@@ -179,9 +181,20 @@ class ReliabilityPrototypeMemory:
         self.selection_updates = int(state.get("selection_updates", 0))
 
     @torch.no_grad()
-    def update_source_prototypes(self, features: torch.Tensor, labels: torch.Tensor) -> None:
+    def update_source_prototypes(self, features: torch.Tensor, labels: torch.Tensor,
+                                 logits: torch.Tensor | None = None) -> None:
         features = F.normalize(features.detach().float(), dim=1)
         labels = labels.detach().long()
+        # P4: high-confidence filter before prototype update (no target labels).
+        threshold = float(os.environ.get("P4_FILTER", "0"))
+        if logits is not None and threshold > 0.0:
+            probabilities = F.softmax(logits.detach().float(), dim=1)
+            confidence, prediction = probabilities.max(dim=1)
+            keep = prediction.eq(labels) & confidence.ge(threshold)
+            if not bool(keep.any()):
+                return
+            features = features[keep]
+            labels = labels[keep]
         for class_id in range(self.num_classes):
             mask = labels.eq(class_id)
             if not mask.any():
@@ -191,9 +204,11 @@ class ReliabilityPrototypeMemory:
                 self.source_prototypes[class_id] = prototype
                 self.source_valid[class_id] = True
             else:
+                momentum = float(os.environ.get("P4_MOMENTUM", str(self.source_prototype_momentum)))
+                momentum = min(max(momentum, 0.0), 0.999)
                 updated = (
-                    self.source_prototype_momentum * self.source_prototypes[class_id]
-                    + (1.0 - self.source_prototype_momentum) * prototype
+                    momentum * self.source_prototypes[class_id]
+                    + (1.0 - momentum) * prototype
                 )
                 self.source_prototypes[class_id] = F.normalize(updated, dim=0)
             self.source_support[class_id] += float(mask.sum().item())

@@ -1243,9 +1243,13 @@ def run_epoch(
             if args.use_prat:
                 prototype_features.append(styled_output.features.detach())
                 prototype_labels.append(source_y)
+            prototype_logits = [source_output.logits.detach()]
+            if args.use_prat:
+                prototype_logits.append(styled_output.logits.detach())
             memory.update_source_prototypes(
                 torch.cat(prototype_features, dim=0),
                 torch.cat(prototype_labels, dim=0),
+                torch.cat(prototype_logits, dim=0),
             )
 
             open_set_unknown = None
