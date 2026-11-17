@@ -7,7 +7,9 @@ import numpy as np
 import torch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'core'))
-from data import load_source_scene,load_target_image_only,align_target_bands
+from data import (PatchDataset,align_target_bands,coordinates_from_mask,
+                  labels_at_coordinates,load_source_scene,load_target_ground_truth_only,
+                  load_target_image_only)
 from trainer import (DualReliabilityEncoder,build_parser,build_target_evaluation_loader,
                      evaluate_target,set_seed,predict_probabilities)
 
@@ -20,6 +22,7 @@ def main():
     p.add_argument('--confirm-final-eval',action='store_true')
     p.add_argument('--prior-calib',action='store_true',dest='prior_calib')
     p.add_argument('--adabn',action='store_true',dest='adabn')
+    p.add_argument('--sliding',action='store_true',dest='sliding')
     args=p.parse_args()
     if not args.confirm_final_eval: raise PermissionError('Explicit --confirm-final-eval required')
     path=Path(args.checkpoint);out=Path(args.output)
@@ -90,7 +93,38 @@ def main():
                 for batch in loader:
                     model(batch[0].to(device,non_blocking=True))
         model.eval()
-    if args.prior_calib:
+    if args.sliding:
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        from eval_prior_calib import em_target_prior,metrics_from_confusion
+        gt=load_target_ground_truth_only(t.data_path,t.target_name,t.num_classes)
+        valid=(gt>0)&(np.linalg.norm(aligned,axis=-1)>0)
+        coordinates=coordinates_from_mask(valid)
+        labels_np=labels_at_coordinates(gt,coordinates)-1
+        offsets=[(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+        height,width=aligned.shape[:2]
+        prob_sum=torch.zeros(len(coordinates),t.num_classes)
+        for dy,dx in offsets:
+            shifted=coordinates+np.array([dy,dx])
+            shifted[:,0]=np.clip(shifted[:,0],0,height-1)
+            shifted[:,1]=np.clip(shifted[:,1],0,width-1)
+            dataset=PatchDataset(aligned,shifted,patch_size=t.patch_size,labels=labels_np,augment=False)
+            loader_p10=torch.utils.data.DataLoader(dataset,batch_size=128,shuffle=False)
+            with torch.no_grad():
+                for batch in loader_p10:
+                    x=batch[0].to(device,non_blocking=True)
+                    prob_sum+=torch.softmax(model(x).logits.float(),dim=1).cpu()
+        probabilities=(prob_sum/float(len(offsets))).numpy().astype('float64')
+        source_prior=np.full(t.num_classes,1.0/t.num_classes)
+        target_prior=em_target_prior(probabilities,source_prior)
+        target_prior=0.5*target_prior+0.5*source_prior
+        target_prior=np.clip(target_prior,0.02,None);target_prior=target_prior/target_prior.sum()
+        adjusted=probabilities*np.exp(0.5*np.log(target_prior/source_prior))[None,:]
+        prediction=adjusted.argmax(axis=1)
+        confusion=np.zeros((t.num_classes,t.num_classes),dtype=np.int64)
+        for truth,pred in zip(labels_np,prediction):confusion[truth,pred]+=1
+        metrics=metrics_from_confusion(confusion)
+        metrics['inference']={'sliding_offsets':len(offsets),'prior_calib':True}
+    elif args.prior_calib:
         sys.path.insert(0,str(Path(__file__).resolve().parent))
         from eval_prior_calib import em_target_prior,metrics_from_confusion
         probabilities_list=[];label_list=[]
