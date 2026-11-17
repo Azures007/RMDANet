@@ -620,11 +620,16 @@ class PatchDataset(Dataset):
         patch = _apply_spectral_pca(patch)
         patch = _apply_pretrained_features(patch)
         p6_boost = float(os.environ.get("P6_BOOST", "0"))
-        if p6_boost > 0.0 and self.augment and self.labels is not None:
+        if p6_boost > 0.0 and self.augment:
             classes_env = os.environ.get("P6_CLASSES", "").strip()
             weak = {int(x) for x in classes_env.split(",") if x.strip()}
-            label_now = int(self.labels[index]) if index < len(self.labels) else -1
-            if weak and label_now in weak and np.random.random() < float(os.environ.get("P6_PROB", "0.4")):
+            if weak:
+                label_now = int(self.labels[index]) if self.labels is not None else -1
+                apply_p6 = label_now in weak
+            else:
+                # C variant: no class selection at all (label-free, no target GT).
+                apply_p6 = True
+            if apply_p6 and np.random.random() < float(os.environ.get("P6_PROB", "0.4")):
                 patch = self._lowfreq_boost(
                     patch, low_k=int(os.environ.get("P6_LOWK", "3")), boost=p6_boost)
         if os.environ.get("FREQ_DUAL", "").strip() == "1":
