@@ -1596,7 +1596,8 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
                         "PATCH_SIZE_OVERRIDE", "OPEN_SET_OT", "OPEN_SET_FRAC", "OPEN_SET_TAU",
-                        "P5_PAIRS", "P5_MARGIN", "TEACHER_SOFT_DECAY", "P5_LATE_START", "P5_LATE_QUOTA")
+                        "P5_PAIRS", "P5_MARGIN", "TEACHER_SOFT_DECAY", "P5_LATE_START", "P5_LATE_QUOTA",
+                        "CURRICULUM_CONF", "CURRICULUM_WARM", "CURRICULUM_EXTRA")
         },
     }
     return snapshot
@@ -1841,7 +1842,13 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
 
     alignment_state = {'active_epochs': 0, 'first_epoch': None}
     start_time = time.time()
+    base_pseudo_confidence = float(getattr(args, "pseudo_confidence", memory.pseudo_confidence))
     for epoch in range(1, args.epochs + 1):
+        # Plan 6: easy-to-hard pseudo-label confidence curriculum (env gated).
+        if os.environ.get("CURRICULUM_CONF", "").strip() == "1":
+            warm = max(1, int(os.environ.get("CURRICULUM_WARM", "20")))
+            extra = float(os.environ.get("CURRICULUM_EXTRA", "0.03"))
+            memory.pseudo_confidence = base_pseudo_confidence + extra * max(0.0, 1.0 - (epoch - 1) / warm)
         if (
             args.pseudo_mode != "off"
             and epoch >= args.pseudo_start_epoch
