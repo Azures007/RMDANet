@@ -36,6 +36,15 @@ def main():
     t=ap.parse_args([])
     t.data_path=args.data_path
     t.num_workers=0
+    # Infer the true input channel count from the checkpoint weights (the
+    # args["bands"] entry may be missing when the front-end changes channels).
+    try:
+        inferred_bands=int(checkpoint['model']['spectral_encoder.raw_projection.1.weight'].shape[1])
+        if inferred_bands!=int(getattr(t,'bands',inferred_bands)):
+            print(f'[FINAL EVAL] inferred bands={inferred_bands} from checkpoint')
+            t.bands=inferred_bands
+    except Exception:
+        pass
     device=torch.device(args.device if torch.cuda.is_available() and args.device.startswith('cuda') else 'cpu')
     mode='median' if t.amplitude_channel else 'l2'
     # Source GT is permissible for source-only input preparation; target GT still unopened.
