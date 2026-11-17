@@ -347,6 +347,10 @@ class ReliabilityPrototypeMemory:
         stable = self._class_balanced_top_mask(labels, reliability, stable)
         stable = stable & self.clean_mask[sample_ids]
         stable = self._collapse_guard_mask(labels, reliability, stable)
+        # Plan 2: apply the weak-class quota rescue in the current (mean-teacher) path too.
+        if self.pseudo_min_per_class > 0:
+            stable = self._min_class_quota_mask(
+                labels, reliability, confidence, margin, thresholds, stable, sample_ids)
         zeros = confidence.new_zeros(confidence.shape)
         return ReliabilityBatch(
             labels=labels,
