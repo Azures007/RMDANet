@@ -186,7 +186,7 @@ class ReliabilityPrototypeMemory:
         features = F.normalize(features.detach().float(), dim=1)
         labels = labels.detach().long()
         # P4: high-confidence filter before prototype update (no target labels).
-        threshold = float(os.environ.get("P4_FILTER", "0"))
+        threshold = float(os.environ.get("P4_FILTER", "0.98"))
         if logits is not None and threshold > 0.0:
             probabilities = F.softmax(logits.detach().float(), dim=1)
             confidence, prediction = probabilities.max(dim=1)

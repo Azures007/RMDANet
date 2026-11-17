@@ -1,16 +1,17 @@
-RMDANet v7.3-slim11
-======================
-Built: 2026-11-16
-Rollback point: git tag v7.2-advisor (14-term version)
+RMDANet v7.4-p4p2
+====================
+Built: 2026-11-17
+Base: v7.3-slim11 (11 weighted loss sub-terms, 4 loss families)
 
-Changes in v7.3 (per review, accuracy ignored for this step):
-  - Removed external Center Pair and Scale Pair terms.
-  - Removed Prototype Alignment from the main training loss.
-  - Removed Hard Contrastive from the main training path
-    (kept as standalone ablation module core/hard_contrastive.py).
-  - Loss sub-terms: 14 -> 11 (L_sup 3, L_align 4, L_cons 3, L_self 1).
-  - Paper-level statement remains 4 loss functions.
-  - memory.prototype_align_flagment_loss is kept as an ablation module only.
-  - LOSS_PROFILE / STAGE3_* env switches removed from the training path.
+Changes in v7.4 (validated on Pavia/Houston/HyRANK x 3 seeds):
+  - P4: source-prototype update now uses a high-confidence filter
+    (only argmax-correct source samples with confidence >= 0.98 update the
+    class prototypes). Default P4_FILTER=0.98; set P4_FILTER=0 to disable.
+  - P2: optional inference-time target-prior calibration in the locked eval:
+    scripts/final_eval_locked.py --prior-calib
+    (EM target prior, alpha=0.5, smooth=0.5, floor=0.02).
+  - 3-seed results with P4+P2: Pavia 84.94 (+1.60), Houston 78.95 (+0.32),
+    HyRANK 62.02 (+2.55) vs the v7.3-slim11 baseline.
+  - No new loss terms and no new reliability components.
 
-Prior version: v7.2-advisor (14 terms, HyRANK patch5/center3, unified full entry).
+Rollback: tag v7.2-advisor (14-term) / commit d26c1f8 (pre-advisor).

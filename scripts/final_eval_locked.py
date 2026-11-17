@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'core'))
 from data import load_source_scene,load_target_image_only,align_target_bands
 from trainer import (DualReliabilityEncoder,build_parser,build_target_evaluation_loader,
-                     evaluate_target,set_seed)
+                     evaluate_target,set_seed,predict_probabilities)
 
 def main():
     p=argparse.ArgumentParser()
@@ -18,6 +18,7 @@ def main():
     p.add_argument('--device',default='cuda:0')
     p.add_argument('--output',required=True)
     p.add_argument('--confirm-final-eval',action='store_true')
+    p.add_argument('--prior-calib',action='store_true',dest='prior_calib')
     args=p.parse_args()
     if not args.confirm_final_eval: raise PermissionError('Explicit --confirm-final-eval required')
     path=Path(args.checkpoint);out=Path(args.output)
@@ -78,7 +79,30 @@ def main():
     model.load_state_dict(checkpoint['model'],strict=True);model.eval()
     print('[FINAL EVAL] Loading TARGET GT NOW for reporting ONLY')
     loader=build_target_evaluation_loader(t,aligned)
-    metrics=evaluate_target(model,loader,device,num_classes=t.num_classes,use_tta=t.final_tta)
+    if args.prior_calib:
+        sys.path.insert(0,str(Path(__file__).resolve().parent))
+        from eval_prior_calib import em_target_prior,metrics_from_confusion
+        probabilities_list=[];label_list=[]
+        with torch.no_grad():
+            for batch in loader:
+                x=batch[0].to(device,non_blocking=True)
+                probabilities_list.append(predict_probabilities(model,x,use_tta=t.final_tta).float().cpu())
+                label_list.append(batch[1].cpu())
+        probabilities=torch.cat(probabilities_list).numpy().astype('float64')
+        labels=torch.cat(label_list).numpy().astype('int64')
+        num_classes=t.num_classes
+        source_prior=np.full(num_classes,1.0/num_classes,dtype='float64')
+        target_prior=em_target_prior(probabilities,source_prior)
+        target_prior=0.5*target_prior+0.5*source_prior
+        target_prior=np.clip(target_prior,0.02,None);target_prior=target_prior/target_prior.sum()
+        adjusted=probabilities*np.exp(0.5*np.log(target_prior/source_prior))[None,:]
+        prediction=adjusted.argmax(axis=1)
+        confusion=np.zeros((num_classes,num_classes),dtype='int64')
+        for truth,pred in zip(labels,prediction):confusion[truth,pred]+=1
+        metrics=metrics_from_confusion(confusion)
+        metrics['prior_calib']={'alpha':0.5,'smooth':0.5,'floor':0.02,'target_prior':target_prior.tolist()}
+    else:
+        metrics=evaluate_target(model,loader,device,num_classes=t.num_classes,use_tta=t.final_tta)
     payload={'checkpoint':str(path),'selection':checkpoint['selection'],'metrics':metrics}
     out.parent.mkdir(parents=True,exist_ok=True)
     out.write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding='utf8')
