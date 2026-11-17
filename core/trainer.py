@@ -972,6 +972,16 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     counts[counts == 0] = 1.0
     class_weights = (counts.mean() / counts) ** float(args.source_class_weight_power)
     class_weights = class_weights / class_weights.mean()
+    # Weak-class CE weighting (env gated, reuses the existing supervised loss).
+    _weak_env = os.environ.get("WEAK_CLASS_IDS", "").strip()
+    if _weak_env:
+        _weights = np.asarray(class_weights, dtype=np.float64).copy()
+        _factor = float(os.environ.get("WEAK_CLASS_WEIGHT", "1.5"))
+        for _class_id in [int(v) for v in _weak_env.split(",") if v.strip()]:
+            if 0 <= _class_id < len(_weights):
+                _weights[_class_id] *= _factor
+        _weights = _weights / _weights.mean()
+        class_weights = _weights
     source_sampler_power = float(args.source_sampler_power)
     sample_weights = (counts.mean() / counts[source_train_labels]) ** source_sampler_power
 
