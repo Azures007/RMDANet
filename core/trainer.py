@@ -22,6 +22,7 @@ from torch.utils import data
 from data import (
     PatchDataset,
     compute_spectral_pca,
+    train_target_autoencoder,
     compute_target_frequency,
     align_target_bands,
     build_neighbor_ids,
@@ -885,6 +886,12 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     if os.environ.get("SPECTRAL_PCA", "").strip() not in ("", "0"):
         compute_spectral_pca(
             target_image, int(os.environ.get("SPECTRAL_PCA", "30")), seed=int(args.seed))
+    if os.environ.get("PRETRAIN_FE", "").strip() == "1":
+        latent_dim = train_target_autoencoder(
+            target_image, int(os.environ.get("PRETRAIN_FE_LATENT", "32")),
+            seed=int(args.seed))
+        bands += latent_dim
+        args.bands = int(bands)
     if os.environ.get("FFT_AUG", "").strip() == "1":
         compute_target_frequency(
             target_image, int(args.patch_size), seed=int(args.seed))
@@ -1052,6 +1059,9 @@ def build_target_evaluation_loader(
     if os.environ.get("SPECTRAL_PCA", "").strip() not in ("", "0"):
         compute_spectral_pca(
             target_image, int(os.environ.get("SPECTRAL_PCA", "30")), seed=0)
+    if os.environ.get("PRETRAIN_FE", "").strip() == "1":
+        train_target_autoencoder(
+            target_image, int(os.environ.get("PRETRAIN_FE_LATENT", "32")), seed=0)
     dataset = PatchDataset(
         target_image,
         coordinates,

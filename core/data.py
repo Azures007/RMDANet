@@ -108,6 +108,57 @@ def _apply_fft_style(patch: np.ndarray, beta: float = 0.5) -> np.ndarray:
     return styled.astype(np.float32)
 
 
+_AE_W1 = None
+_AE_B1 = None
+_AE_LATENT = 0
+
+
+def train_target_autoencoder(image: np.ndarray, latent: int = 32, samples: int = 8000,
+                             steps: int = 600, lr: float = 1e-3, seed: int = 0):
+    """Unsupervised target-domain spectral autoencoder; returns encoder params."""
+    flat = np.asarray(image, dtype=np.float32).reshape(-1, image.shape[-1])
+    rng = np.random.default_rng(seed + 555)
+    if flat.shape[0] > samples:
+        flat = flat[rng.choice(flat.shape[0], samples, replace=False)]
+    mean = flat.mean(axis=0, keepdims=True)
+    std = flat.std(axis=0, keepdims=True).clip(min=1e-5)
+    x = torch.from_numpy((flat - mean) / std).float()
+    torch.manual_seed(seed + 556)
+    encoder = torch.nn.Linear(x.shape[1], latent)
+    decoder = torch.nn.Linear(latent, x.shape[1])
+    optimizer = torch.optim.Adam(list(encoder.parameters()) + list(decoder.parameters()), lr=lr)
+    for _ in range(steps):
+        code = torch.relu(encoder(x))
+        reconstruction = decoder(code)
+        loss = torch.nn.functional.mse_loss(reconstruction, x)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+    with torch.no_grad():
+        w1 = encoder.weight.detach().cpu().numpy().astype(np.float32)
+        b1 = encoder.bias.detach().cpu().numpy().astype(np.float32)
+    set_pretrained_encoder(w1, b1, mean.astype(np.float32), std.astype(np.float32))
+    print(f"[pretrain-fe] target spectral autoencoder: {w1.shape[0]}-d latent")
+    return w1.shape[0]
+
+
+def set_pretrained_encoder(w1, b1, mean=None, std=None) -> None:
+    global _AE_W1, _AE_B1, _AE_LATENT
+    _AE_W1 = np.asarray(w1, dtype=np.float32)
+    _AE_B1 = np.asarray(b1, dtype=np.float32)
+    _AE_LATENT = int(_AE_W1.shape[0])
+
+
+def _apply_pretrained_features(patch: np.ndarray) -> np.ndarray:
+    if _AE_W1 is None or _AE_B1 is None:
+        return patch
+    shape = patch.shape
+    flat = patch.reshape(-1, shape[-1])
+    latent = np.maximum(flat @ _AE_W1.T + _AE_B1, 0.0).astype(np.float32)
+    latent = latent.reshape(shape[0], shape[1], _AE_LATENT)
+    return np.concatenate([patch, latent], axis=-1)
+
+
 @dataclass(frozen=True)
 class SceneData:
     image: np.ndarray
@@ -551,6 +602,7 @@ class PatchDataset(Dataset):
         if os.environ.get("EDGE_ENHANCE", "").strip() == "1":
             patch = self._edge_enhance(patch, float(os.environ.get("EDGE_GAIN", "0.3")))
         patch = _apply_spectral_pca(patch)
+        patch = _apply_pretrained_features(patch)
         if os.environ.get("FREQ_DUAL", "").strip() == "1":
             low = self._blur_patch(patch)
             high = patch - low
