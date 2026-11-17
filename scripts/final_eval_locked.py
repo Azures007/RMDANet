@@ -104,10 +104,13 @@ def main():
                     model(batch[0].to(device,non_blocking=True))
         model.eval()
     _tent_env = os.environ.get("TENT", "").strip().lower()
-    if _tent_env == "":
-        tent_enabled = str(getattr(t, "dataset", "")).lower() == "hyrank"
-    else:
+    _cfg_tent = getattr(t, "eval_tent", None)
+    if _tent_env != "":
         tent_enabled = _tent_env in ("1", "true", "yes")
+    elif _cfg_tent is not None:
+        tent_enabled = bool(_cfg_tent)
+    else:
+        tent_enabled = str(getattr(t, "dataset", "")).lower() == "hyrank" 
     if tent_enabled:
         # Test-time entropy minimization: adapt only BatchNorm affine params/stats
         # on unlabeled target data (no target GT used).
@@ -155,6 +158,10 @@ def main():
         slab=dict(pavia=(2,1.0),houston=(2,1.5),hyrank=(1,1.5))
         _key=str(getattr(t,'dataset','') or '').lower()
         _d_radius,_d_temp=slab.get(_key,(1,1.0))
+        _cfg_radius=getattr(t,'eval_sliding_radius',None)
+        _cfg_temp=getattr(t,'eval_temperature',None)
+        if _cfg_radius is not None: _d_radius=int(_cfg_radius)
+        if _cfg_temp is not None: _d_temp=float(_cfg_temp)
         sl_radius=int(os.environ.get('SLIDING_RADIUS',str(_d_radius)))
         offsets=[(dy,dx) for dy in range(-sl_radius,sl_radius+1) for dx in range(-sl_radius,sl_radius+1)]
         height,width=aligned.shape[:2]
@@ -179,10 +186,13 @@ def main():
             prob_sum = weighted if prob_sum is None else prob_sum + weighted
         probabilities=(prob_sum/weight_sum).numpy().astype('float64')
         _smooth_env = os.environ.get('SPATIAL_SMOOTH', '')
-        if _smooth_env == '':
-            smooth_sigma = 4.0 if str(getattr(t, 'dataset', '')).lower() == 'pavia' else 0.0
-        else:
+        _cfg_smooth = getattr(t, 'eval_spatial_smooth', None)
+        if _smooth_env != '':
             smooth_sigma = float(_smooth_env)
+        elif _cfg_smooth is not None:
+            smooth_sigma = float(_cfg_smooth)
+        else:
+            smooth_sigma = 4.0 if _key == 'pavia' else 0.0
         if smooth_sigma>0:
             from scipy.ndimage import gaussian_filter
             prob_map=np.zeros((height,width,t.num_classes),dtype='float32')
@@ -226,7 +236,9 @@ def main():
         probabilities=torch.cat(probabilities_list).numpy().astype('float64')
         _slab2=dict(pavia=(2,1.0),houston=(2,1.5),hyrank=(1,1.5))
         _k2=str(getattr(t,'dataset','') or '').lower()
-        _d_temp2=_slab2.get(_k2,(1,1.0))[1]
+        _d_temp2=getattr(t,'eval_temperature',None)
+        if _d_temp2 is None: _d_temp2=_slab2.get(_k2,(1,1.0))[1]
+        _d_temp2=float(_d_temp2)
         probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE',str(_d_temp2))))
         labels=torch.cat(label_list).numpy().astype('int64')
         num_classes=t.num_classes

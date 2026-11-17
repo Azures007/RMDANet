@@ -83,3 +83,9 @@ uda:
   p6_classes: "2,3,5"
   p6_prob: 0.4
   p6_lowk: 3
+
+# inference-time defaults used by scripts/final_eval_locked.py
+  eval_temperature: 1.0
+  eval_sliding_radius: 2
+  eval_spatial_smooth: 4.0
+  eval_tent: false

@@ -82,3 +82,9 @@ uda:
   use_gt_target_mask: false
   # P6 disabled for HyRANK
   p6_boost: 0.0
+
+# inference-time defaults used by scripts/final_eval_locked.py
+  eval_temperature: 1.5
+  eval_sliding_radius: 1
+  eval_spatial_smooth: 0.0
+  eval_tent: true
