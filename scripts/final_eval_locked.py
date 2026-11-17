@@ -178,6 +178,15 @@ def main():
             weighted = offset_mean * weight
             prob_sum = weighted if prob_sum is None else prob_sum + weighted
         probabilities=(prob_sum/weight_sum).numpy().astype('float64')
+        smooth_sigma=float(os.environ.get('SPATIAL_SMOOTH','0'))
+        if smooth_sigma>0:
+            from scipy.ndimage import gaussian_filter
+            prob_map=np.zeros((height,width,t.num_classes),dtype='float32')
+            prob_map[coordinates[:,0],coordinates[:,1]]=probabilities.astype('float32')
+            for cidx in range(t.num_classes):
+                prob_map[:,:,cidx]=gaussian_filter(prob_map[:,:,cidx],sigma=smooth_sigma,mode='nearest')
+            probabilities=prob_map[coordinates[:,0],coordinates[:,1]].astype('float64')
+            probabilities=probabilities/np.clip(probabilities.sum(axis=1,keepdims=True),1e-12,None)
         probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE',str(_d_temp))))
         source_prior=np.full(t.num_classes,1.0/t.num_classes)
         p2_iters=int(os.environ.get('P2_EM_ITERS','30'))
