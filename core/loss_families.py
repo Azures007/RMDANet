@@ -10,8 +10,8 @@ the family-level view used for reporting/ablation, so it does not change the
 optimisation order (and therefore not the accuracy).
 
     L_sup   (multi-view supervision) : source CE + PRAT styled CE + spectral aux CE
-    L_align (class-conditional align) : CCA + source metric + CORAL + LMMD + prototype
-    L_cons  (consistency regulariser) : style pair + scale pair + center pair + scale MI + teacher soft
+    L_align (class-conditional align) : CCA + source metric + CORAL + LMMD (prototype removed in v7.3)
+    L_cons  (consistency regulariser) : style pair (composite) + scale MI + teacher soft (v7.3)
     L_self  (self-training)           : weighted pseudo-label CE
 """
 from __future__ import annotations
