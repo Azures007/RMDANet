@@ -103,6 +103,43 @@ def main():
                 for batch in loader:
                     model(batch[0].to(device,non_blocking=True))
         model.eval()
+    if os.environ.get("TENT", "").strip() == "1":
+        # Test-time entropy minimization: adapt only BatchNorm affine params/stats
+        # on unlabeled target data (no target GT used).
+        bn_params = []
+        for module in model.modules():
+            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                module.train()
+                if module.weight is not None:
+                    bn_params.append(module.weight)
+                if module.bias is not None:
+                    bn_params.append(module.bias)
+        if not bn_params:
+            print("[TENT] no BatchNorm affine parameters found; skipped")
+        else:
+            for module in model.modules():
+                if not isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                    module.eval()
+            optimizer = torch.optim.Adam(bn_params, lr=float(os.environ.get("TENT_LR", "0.001")))
+            steps = int(os.environ.get("TENT_STEPS", "50"))
+            iterator = iter(loader)
+            done = 0
+            while done < steps:
+                try:
+                    batch = next(iterator)
+                except StopIteration:
+                    iterator = iter(loader)
+                    batch = next(iterator)
+                x = batch[0].to(device, non_blocking=True)
+                logits = model(x).logits.float()
+                prob = torch.softmax(logits, dim=1)
+                loss = -(prob * torch.log(prob.clamp_min(1e-8))).sum(dim=1).mean()
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
+                done += 1
+            model.eval()
+            print(f"[TENT] adapted BN affine ({len(bn_params)} tensors) in {steps} steps")
     if args.sliding:
         sys.path.insert(0,str(Path(__file__).resolve().parent))
         from eval_prior_calib import em_target_prior,metrics_from_confusion
