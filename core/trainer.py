@@ -1447,6 +1447,10 @@ def run_epoch(
 
             cca_lambda *= maturity_factor
 
+            soft_lambda = float(getattr(args, "lambda_soft_consistency", 0.12))
+            if os.environ.get("TEACHER_SOFT_DECAY", "").strip() == "1" and epoch > 30:
+                ratio = min(1.0, (epoch - 30) / 20.0)
+                soft_lambda = soft_lambda * (1.0 - 0.67 * ratio)
             total_loss = (
                 source_loss
                 + (args.lambda_style_supervision if args.use_prat else 0.0) * styled_supervision
@@ -1458,7 +1462,7 @@ def run_epoch(
                 + effective_lmmd_lambda * lmmd_term
                 + cca_lambda * cca_loss
                 + pseudo_ramp * args.lambda_pseudo * pseudo_loss
-                + pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]
+                + pseudo_ramp * soft_lambda * teacher_losses["soft"]
             )
 
             # Paper-level four-family view (logging only; total_loss above is
@@ -1475,7 +1479,7 @@ def run_epoch(
                     "lmmd": (effective_lmmd_lambda * lmmd_term).detach(),
                     "style_pair": ((args.lambda_style_pair if args.use_prat else 0.0) * pair_loss).detach(),
                     "scale_mi": (args.lambda_scale_mi * scale_mi).detach(),
-                    "teacher_soft": (pseudo_ramp * args.lambda_soft_consistency * teacher_losses["soft"]).detach(),
+                    "teacher_soft": (pseudo_ramp * soft_lambda * teacher_losses["soft"]).detach(),
                     "pseudo_ce": (pseudo_ramp * args.lambda_pseudo * pseudo_loss).detach(),
                 }
                 family_totals_map = family_totals(family_values)
@@ -1577,7 +1581,7 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
                         "PATCH_SIZE_OVERRIDE", "OPEN_SET_OT", "OPEN_SET_FRAC", "OPEN_SET_TAU",
-                        "P5_PAIRS", "P5_MARGIN")
+                        "P5_PAIRS", "P5_MARGIN", "TEACHER_SOFT_DECAY")
         },
     }
     return snapshot
