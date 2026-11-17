@@ -219,9 +219,17 @@ def main():
         else:
             alpha_vec=np.full(t.num_classes,p2_alpha)
         adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior)[None,:])
-        if os.environ.get("MARGIN_MATCH", "").strip() == "1":
-            eta = float(os.environ.get("MM_ETA", "0.5"))
-            iters = int(os.environ.get("MM_ITERS", "20"))
+        _mm_env = os.environ.get("MARGIN_MATCH", "").strip()
+        _mm_cfg = getattr(t, "eval_margin_match", None)
+        if _mm_env != "":
+            mm_enabled = _mm_env == "1"
+        elif _mm_cfg is not None:
+            mm_enabled = bool(_mm_cfg)
+        else:
+            mm_enabled = False
+        if mm_enabled:
+            eta = float(os.environ.get("MM_ETA", str(getattr(t, "eval_mm_eta", 0.5))))
+            iters = int(os.environ.get("MM_ITERS", str(getattr(t, "eval_mm_iters", 20))))
             logp = np.log(np.clip(adjusted, 1e-12, None))
             bias = np.zeros(t.num_classes)
             for _ in range(iters):

@@ -88,3 +88,4 @@ uda:
   eval_sliding_radius: 1
   eval_spatial_smooth: 0.0
   eval_tent: true
+  eval_margin_match: false

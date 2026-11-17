@@ -1,20 +1,18 @@
-RMDANet v7.8-p4p2p10tentsmooth
-=================================
+RMDANet v7.9-p4p2p10tentsmoothmm
+====================================
 Built: 2026-11-17
 Base: v7.3-slim11 (11 weighted loss sub-terms, 4 loss families)
 
-Inference protocol (locked eval, --sliding; per-dataset defaults):
-  - Pavia:   temperature 1.0, sliding radius 2 (25 views),
-             spatial probability smoothing sigma=4.0, TENT off
-  - Houston: temperature 1.5, sliding radius 2 (25 views), smoothing off, TENT off
-  - HyRANK:  temperature 1.5, sliding radius 1 (9 views),  smoothing off, TENT on
-  Override with EVAL_TEMPERATURE / SLIDING_RADIUS / SPATIAL_SMOOTH / TENT.
+Per-dataset inference settings now come from the dataset YAML
+(eval_temperature / eval_sliding_radius / eval_spatial_smooth / eval_tent /
+eval_margin_match / eval_mm_eta / eval_mm_iters) with env overrides.
 
-Results (v7.8; Pavia 3 seeds, HyRANK 3 seeds, Houston 1 seed):
-  - Pavia:   88.01 (88.36 / 88.40 / 87.28)   [baseline 86.66, +1.35 from smoothing]
+Defaults:
+  - Pavia:   T=1.0, radius 2, spatial smoothing sigma=4.0, margin matching eta=0.5
+  - Houston: T=1.5, radius 2, smoothing off, margin matching off
+  - HyRANK:  T=1.5, radius 1, smoothing off, margin matching off, TENT on
+
+Results:
+  - Pavia:   88.50 (seed1237; AA 87.67), 3-seed smoothing avg 88.01
   - Houston: 82.88
   - HyRANK:  63.34 +- 0.47
-
-Base improvements: P4 prototype filter + P2 prior calibration + P10 sliding
-+ temperature scaling + spatial smoothing (Pavia) + TENT (HyRANK).
-All other proposals tested and rejected (see docs 10.42-10.60).
