@@ -79,3 +79,5 @@ uda:
   # strict UDA guards
   target_gt_mix_ratio: 0.0
   use_gt_target_mask: false
+  # P6 disabled for Houston
+  p6_boost: 0.0

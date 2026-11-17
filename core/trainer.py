@@ -875,6 +875,15 @@ def build_loaders(args: argparse.Namespace, device: torch.device) -> dict[str, A
     source_validation_labels = labels_at_coordinates(
         source_validation_gt, source_validation_coordinates
     ) - 1
+    # P6: dataset-level low-frequency augmentation enabled via config (Pavia only).
+    p6_boost = float(getattr(args, "p6_boost", 0.0) or 0.0)
+    if p6_boost > 0.0 and not os.environ.get("P6_BOOST"):
+        os.environ["P6_BOOST"] = str(p6_boost)
+        os.environ.setdefault("P6_CLASSES", str(getattr(args, "p6_classes", "")))
+        os.environ.setdefault("P6_PROB", str(getattr(args, "p6_prob", "0.4")))
+        os.environ.setdefault("P6_LOWK", str(getattr(args, "p6_lowk", "3")))
+        print(f"[p6] low-frequency boost enabled: {os.environ['P6_BOOST']} "
+              f"classes={os.environ.get('P6_CLASSES')}")
     # num_classes is the number of valid classes after subtracting background (0)
     # Labels are 1-N in ground truth, 0-(N-1) after -1, so max of ground truth gives N
     num_classes = int(source_scene.ground_truth.max())

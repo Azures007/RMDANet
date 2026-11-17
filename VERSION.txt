@@ -1,17 +1,14 @@
-RMDANet v7.4-p4p2
-====================
+RMDANet v7.5-p4p2p6
+======================
 Built: 2026-11-17
 Base: v7.3-slim11 (11 weighted loss sub-terms, 4 loss families)
 
-Changes in v7.4 (validated on Pavia/Houston/HyRANK x 3 seeds):
-  - P4: source-prototype update now uses a high-confidence filter
-    (only argmax-correct source samples with confidence >= 0.98 update the
-    class prototypes). Default P4_FILTER=0.98; set P4_FILTER=0 to disable.
-  - P2: optional inference-time target-prior calibration in the locked eval:
-    scripts/final_eval_locked.py --prior-calib
-    (EM target prior, alpha=0.5, smooth=0.5, floor=0.02).
-  - 3-seed results with P4+P2: Pavia 84.94 (+1.60), Houston 78.95 (+0.32),
-    HyRANK 62.02 (+2.55) vs the v7.3-slim11 baseline.
-  - No new loss terms and no new reliability components.
-
-Rollback: tag v7.2-advisor (14-term) / commit d26c1f8 (pre-advisor).
+Changes in v7.5:
+  - P4 (source-prototype high-confidence filter) default ON (P4_FILTER=0.98).
+  - P2 inference-time target-prior calibration: final_eval_locked.py --prior-calib.
+  - P6 weak-class low-frequency augmentation is now enabled per dataset via
+    config (p6_boost / p6_classes / p6_prob / p6_lowk). Enabled for Pavia only
+    (boost=1.5, classes 2/3/5); disabled for Houston/HyRANK.
+  - 3-seed results: Pavia 86.47 +- 0.36 (+3.13 vs v7.3-slim11),
+    Houston 78.95 +- 0.73 (+0.32), HyRANK 62.02 +- 0.67 (+2.55).
+  - No new loss terms, no new reliability components.
