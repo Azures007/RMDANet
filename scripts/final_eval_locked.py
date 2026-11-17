@@ -110,7 +110,8 @@ def main():
         valid=(gt>0)&(np.linalg.norm(aligned,axis=-1)>0)
         coordinates=coordinates_from_mask(valid)
         labels_np=labels_at_coordinates(gt,coordinates)-1
-        offsets=[(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+        sl_radius=int(os.environ.get('SLIDING_RADIUS','1'))
+        offsets=[(dy,dx) for dy in range(-sl_radius,sl_radius+1) for dx in range(-sl_radius,sl_radius+1)]
         height,width=aligned.shape[:2]
         prob_sum=None
         for dy,dx in offsets:
