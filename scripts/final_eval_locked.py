@@ -19,6 +19,7 @@ def main():
     p.add_argument('--output',required=True)
     p.add_argument('--confirm-final-eval',action='store_true')
     p.add_argument('--prior-calib',action='store_true',dest='prior_calib')
+    p.add_argument('--adabn',action='store_true',dest='adabn')
     args=p.parse_args()
     if not args.confirm_final_eval: raise PermissionError('Explicit --confirm-final-eval required')
     path=Path(args.checkpoint);out=Path(args.output)
@@ -79,6 +80,16 @@ def main():
     model.load_state_dict(checkpoint['model'],strict=True);model.eval()
     print('[FINAL EVAL] Loading TARGET GT NOW for reporting ONLY')
     loader=build_target_evaluation_loader(t,aligned)
+    if args.adabn:
+        # P7: AdaBN — recompute BatchNorm statistics on unlabeled target data.
+        bn_modules=[m for m in model.modules() if isinstance(m,torch.nn.modules.batchnorm._BatchNorm)]
+        print(f'[FINAL EVAL] AdaBN on {len(bn_modules)} BN layer(s)')
+        for m in bn_modules:m.train()
+        with torch.no_grad():
+            for _ in range(3):
+                for batch in loader:
+                    model(batch[0].to(device,non_blocking=True))
+        model.eval()
     if args.prior_calib:
         sys.path.insert(0,str(Path(__file__).resolve().parent))
         from eval_prior_calib import em_target_prior,metrics_from_confusion
