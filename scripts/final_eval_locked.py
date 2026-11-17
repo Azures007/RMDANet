@@ -130,9 +130,13 @@ def main():
         probabilities=(prob_sum/float(len(offsets))).numpy().astype('float64')
         probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE','1.0')))
         source_prior=np.full(t.num_classes,1.0/t.num_classes)
-        target_prior=em_target_prior(probabilities,source_prior)
-        target_prior=0.5*target_prior+0.5*source_prior
-        target_prior=np.clip(target_prior,0.02,None);target_prior=target_prior/target_prior.sum()
+        p2_iters=int(os.environ.get('P2_EM_ITERS','30'))
+        p2_smooth=float(os.environ.get('P2_SMOOTH','0.5'))
+        p2_floor=float(os.environ.get('P2_FLOOR','0.02'))
+        p2_alpha=float(os.environ.get('P2_ALPHA','0.5'))
+        target_prior=em_target_prior(probabilities,source_prior,iterations=p2_iters)
+        target_prior=(1.0-p2_smooth)*target_prior+p2_smooth*source_prior
+        target_prior=np.clip(target_prior,p2_floor,None);target_prior=target_prior/target_prior.sum()
         probabilities=np.asarray(probabilities).reshape(-1,t.num_classes)
         target_prior=np.asarray(target_prior).reshape(-1)
         source_prior=np.asarray(source_prior).reshape(-1)
@@ -140,7 +144,7 @@ def main():
             weak_mask=target_prior < (1.0/t.num_classes)*0.7
             alpha_vec=np.where(weak_mask,0.8,0.3).reshape(-1)
         else:
-            alpha_vec=np.full(t.num_classes,0.5)
+            alpha_vec=np.full(t.num_classes,p2_alpha)
         adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior)[None,:])
         prediction=adjusted.argmax(axis=1)
         confusion=np.zeros((t.num_classes,t.num_classes),dtype=np.int64)
@@ -161,9 +165,13 @@ def main():
         labels=torch.cat(label_list).numpy().astype('int64')
         num_classes=t.num_classes
         source_prior=np.full(num_classes,1.0/num_classes,dtype='float64')
-        target_prior=em_target_prior(probabilities,source_prior)
-        target_prior=0.5*target_prior+0.5*source_prior
-        target_prior=np.clip(target_prior,0.02,None);target_prior=target_prior/target_prior.sum()
+        p2_iters=int(os.environ.get('P2_EM_ITERS','30'))
+        p2_smooth=float(os.environ.get('P2_SMOOTH','0.5'))
+        p2_floor=float(os.environ.get('P2_FLOOR','0.02'))
+        p2_alpha=float(os.environ.get('P2_ALPHA','0.5'))
+        target_prior=em_target_prior(probabilities,source_prior,iterations=p2_iters)
+        target_prior=(1.0-p2_smooth)*target_prior+p2_smooth*source_prior
+        target_prior=np.clip(target_prior,p2_floor,None);target_prior=target_prior/target_prior.sum()
         probabilities=np.asarray(probabilities).reshape(-1,num_classes)
         target_prior=np.asarray(target_prior).reshape(-1)
         source_prior=np.asarray(source_prior).reshape(-1)
@@ -171,7 +179,7 @@ def main():
             weak_mask=target_prior < (1.0/num_classes)*0.7
             alpha_vec=np.where(weak_mask,0.8,0.3).reshape(-1)
         else:
-            alpha_vec=np.full(num_classes,0.5)
+            alpha_vec=np.full(num_classes,p2_alpha)
         adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior)[None,:])
         prediction=adjusted.argmax(axis=1)
         confusion=np.zeros((num_classes,num_classes),dtype='int64')
