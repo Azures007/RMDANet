@@ -1,10 +1,20 @@
 """Single-use, post-training target GT evaluation. Never called by training scripts."""
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 import numpy as np
 import torch
+def apply_temperature(probabilities, temperature):
+    if abs(float(temperature) - 1.0) < 1e-6:
+        return probabilities
+    logits = np.log(np.clip(probabilities, 1e-12, None)) / float(temperature)
+    logits = logits - logits.max(axis=1, keepdims=True)
+    exp = np.exp(logits)
+    return exp / exp.sum(axis=1, keepdims=True)
+
+
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'core'))
 from data import (PatchDataset,align_target_bands,coordinates_from_mask,
@@ -117,6 +127,7 @@ def main():
             offset_mean=torch.cat(offset_probs)
             prob_sum=offset_mean if prob_sum is None else prob_sum+offset_mean
         probabilities=(prob_sum/float(len(offsets))).numpy().astype('float64')
+        probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE','1.0')))
         source_prior=np.full(t.num_classes,1.0/t.num_classes)
         target_prior=em_target_prior(probabilities,source_prior)
         target_prior=0.5*target_prior+0.5*source_prior
@@ -137,6 +148,7 @@ def main():
                 probabilities_list.append(predict_probabilities(model,x,use_tta=t.final_tta).float().cpu())
                 label_list.append(batch[1].cpu())
         probabilities=torch.cat(probabilities_list).numpy().astype('float64')
+        probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE','1.0')))
         labels=torch.cat(label_list).numpy().astype('int64')
         num_classes=t.num_classes
         source_prior=np.full(num_classes,1.0/num_classes,dtype='float64')
