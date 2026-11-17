@@ -1,14 +1,17 @@
-RMDANet v7.5-p4p2p6
-======================
+RMDANet v7.4-p4p2
+====================
 Built: 2026-11-17
 Base: v7.3-slim11 (11 weighted loss sub-terms, 4 loss families)
 
-Changes in v7.5:
-  - P4 (source-prototype high-confidence filter) default ON (P4_FILTER=0.98).
-  - P2 inference-time target-prior calibration: final_eval_locked.py --prior-calib.
-  - P6 weak-class low-frequency augmentation is now enabled per dataset via
-    config (p6_boost / p6_classes / p6_prob / p6_lowk). Enabled for Pavia only
-    (boost=1.5, classes 2/3/5); disabled for Houston/HyRANK.
-  - 3-seed results: Pavia 86.47 +- 0.36 (+3.13 vs v7.3-slim11),
-    Houston 78.95 +- 0.73 (+0.32), HyRANK 62.02 +- 0.67 (+2.55).
-  - No new loss terms, no new reliability components.
+Changes in v7.4 (validated on Pavia/Houston/HyRANK x 3 seeds):
+  - P4: source-prototype high-confidence filter (P4_FILTER=0.98 default).
+  - P2: inference-time target-prior calibration via
+    scripts/final_eval_locked.py --prior-calib (alpha=0.5, smooth=0.5, floor=0.02).
+  - 3-seed results: Pavia 84.94 (+1.60), Houston 78.95 (+0.32), HyRANK 62.02 (+2.55)
+    vs v7.3-slim11 baseline.
+  - No new loss terms and no new reliability components.
+
+Rejected experiment (do not enable): P6 weak-class low-frequency augmentation.
+  Its apparent +1.53 on Pavia came from applying the augmentation at evaluation
+  time using target GT labels; training-only P6 lowers Pavia to 85.08 (-0.95).
+  P6 code remains default-off and is gated to training augmentation only.

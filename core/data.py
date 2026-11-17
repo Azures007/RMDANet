@@ -620,7 +620,7 @@ class PatchDataset(Dataset):
         patch = _apply_spectral_pca(patch)
         patch = _apply_pretrained_features(patch)
         p6_boost = float(os.environ.get("P6_BOOST", "0"))
-        if p6_boost > 0.0 and self.labels is not None:
+        if p6_boost > 0.0 and self.augment and self.labels is not None:
             classes_env = os.environ.get("P6_CLASSES", "").strip()
             weak = {int(x) for x in classes_env.split(",") if x.strip()}
             label_now = int(self.labels[index]) if index < len(self.labels) else -1

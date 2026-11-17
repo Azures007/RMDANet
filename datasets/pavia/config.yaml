@@ -79,7 +79,7 @@ uda:
   target_gt_mix_ratio: 0.0
   use_gt_target_mask: false
   # P6: weak-class low-frequency augmentation (Pavia only)
-  p6_boost: 1.5
+  p6_boost: 0.0
   p6_classes: "2,3,5"
   p6_prob: 0.4
   p6_lowk: 3
