@@ -178,7 +178,11 @@ def main():
             weighted = offset_mean * weight
             prob_sum = weighted if prob_sum is None else prob_sum + weighted
         probabilities=(prob_sum/weight_sum).numpy().astype('float64')
-        smooth_sigma=float(os.environ.get('SPATIAL_SMOOTH','0'))
+        _smooth_env = os.environ.get('SPATIAL_SMOOTH', '')
+        if _smooth_env == '':
+            smooth_sigma = 4.0 if str(getattr(t, 'dataset', '')).lower() == 'pavia' else 0.0
+        else:
+            smooth_sigma = float(_smooth_env)
         if smooth_sigma>0:
             from scipy.ndimage import gaussian_filter
             prob_map=np.zeros((height,width,t.num_classes),dtype='float32')
