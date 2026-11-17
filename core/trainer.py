@@ -1308,6 +1308,24 @@ def run_epoch(
                             reliability_batch.stable_mask = (
                                 reliability_batch.stable_mask & (~unknown_mask))
                             open_set_unknown = unknown_mask.float().mean()
+                # P5: class-pair margin exclusion for pseudo labels.
+                p5_margin = float(os.environ.get("P5_MARGIN", "0"))
+                p5_pairs_env = os.environ.get("P5_PAIRS", "").strip()
+                if p5_margin > 0.0 and p5_pairs_env:
+                    pairs = []
+                    for part in p5_pairs_env.split(";"):
+                        if "," in part:
+                            left, right = part.split(",")[:2]
+                            pairs.append((int(left), int(right)))
+                    if pairs:
+                        log_prob = torch.log(teacher_probability.float().clamp_min(1e-8))
+                        labels_now = reliability_batch.labels
+                        exclude = torch.zeros_like(reliability_batch.stable_mask)
+                        for left, right in pairs:
+                            pair_mask = labels_now.eq(left) | labels_now.eq(right)
+                            margin = (log_prob[:, left] - log_prob[:, right]).abs()
+                            exclude = exclude | (pair_mask & margin.lt(p5_margin))
+                        reliability_batch.stable_mask = reliability_batch.stable_mask & (~exclude)
             else:
                 fallback_probability = F.softmax(source_output.logits.detach().float(), dim=1)
                 reliability_batch = memory.empty_batch(
@@ -1549,7 +1567,8 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "STAGE1_AUG", "DRSE_ALPHA_LOGIT", "ABL_POOL_CENTER_SIZE", "S5_PRETRAINED",
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
-                        "PATCH_SIZE_OVERRIDE", "OPEN_SET_OT", "OPEN_SET_FRAC", "OPEN_SET_TAU")
+                        "PATCH_SIZE_OVERRIDE", "OPEN_SET_OT", "OPEN_SET_FRAC", "OPEN_SET_TAU",
+                        "P5_PAIRS", "P5_MARGIN")
         },
     }
     return snapshot
