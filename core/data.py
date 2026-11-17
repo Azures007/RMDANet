@@ -519,8 +519,8 @@ class PatchDataset(Dataset):
                 extra_radius = max(self.radius, max(self.multiscale_sizes) // 2)
         self.extra_radius = extra_radius
         self._class_indices = {}
-        if os.environ.get("MIXUP_AUG", "").strip() == "1" and self.labels is not None:
-            for idx, lab in enumerate(self.labels):
+        if os.environ.get("MIXUP_AUG", "").strip() == "1" and labels is not None:
+            for idx, lab in enumerate(labels):
                 self._class_indices.setdefault(int(lab), []).append(int(idx))
         self.image = np.pad(
             np.asarray(image, dtype=np.float32),
