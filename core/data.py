@@ -518,6 +518,10 @@ class PatchDataset(Dataset):
             if self.multiscale_sizes:
                 extra_radius = max(self.radius, max(self.multiscale_sizes) // 2)
         self.extra_radius = extra_radius
+        self._class_indices = {}
+        if os.environ.get("MIXUP_AUG", "").strip() == "1" and self.labels is not None:
+            for idx, lab in enumerate(self.labels):
+                self._class_indices.setdefault(int(lab), []).append(int(idx))
         self.image = np.pad(
             np.asarray(image, dtype=np.float32),
             ((self.extra_radius, self.extra_radius), (self.extra_radius, self.extra_radius), (0, 0)),
@@ -650,6 +654,25 @@ class PatchDataset(Dataset):
             if apply_p6 and np.random.random() < float(os.environ.get("P6_PROB", "0.4")):
                 patch = self._lowfreq_boost(
                     patch, low_k=int(os.environ.get("P6_LOWK", "3")), boost=p6_boost)
+        if self.augment and os.environ.get("MIXUP_AUG", "").strip() == "1":
+            if np.random.random() < float(os.environ.get("MIXUP_PROB", "0.5")):
+                patch = patch * (1.0 + np.random.uniform(-0.05, 0.05, size=(1, 1, patch.shape[2])).astype(np.float32))
+                if np.random.random() < 0.3:
+                    band = int(np.random.randint(patch.shape[2]))
+                    patch[:, :, band] = 0.0
+                if self.labels is not None and self._class_indices and np.random.random() < 0.5:
+                    lab = int(self.labels[index])
+                    pool = self._class_indices.get(lab, [])
+                    if pool:
+                        j = int(np.random.choice(pool))
+                        row2, col2 = self.coordinates[j]
+                        row2 += self.extra_radius; col2 += self.extra_radius
+                        half = self.patch_size // 2
+                        patch2 = np.asarray(self.image[row2 - half:row2 + half + 1,
+                                                      col2 - half:col2 + half + 1], dtype=np.float32)
+                        lam = float(np.random.beta(0.4, 0.4))
+                        patch = lam * patch + (1.0 - lam) * patch2
+                patch = np.clip(patch, -3.0, 3.0)
         if os.environ.get("FREQ_DUAL", "").strip() == "1":
             low = self._blur_patch(patch)
             high = patch - low
