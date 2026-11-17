@@ -75,6 +75,8 @@ def main() -> None:
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--prior_smooth", type=float, default=0.5)
     parser.add_argument("--prior_floor", type=float, default=0.02)
+    parser.add_argument("--adjust", choices=["prior", "entropy"], default="prior")
+    parser.add_argument("--entropy_margin", type=float, default=0.5)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--confirm-final-eval", action="store_true")
     args = parser.parse_args()
@@ -156,15 +158,30 @@ def main() -> None:
                     + args.prior_smooth * source_prior)
     target_prior = np.clip(target_prior, args.prior_floor, None)
     target_prior = target_prior / target_prior.sum()
-    log_ratio = np.log(np.clip(target_prior, 1e-8, None) /
-                       np.clip(source_prior, 1e-8, None))
-    adjusted = probabilities * np.exp(args.alpha * log_ratio)[None, :]
+    if args.adjust == "prior":
+        log_ratio = np.log(np.clip(target_prior, 1e-8, None) /
+                           np.clip(source_prior, 1e-8, None))
+        adjusted = probabilities * np.exp(args.alpha * log_ratio)[None, :]
+    else:
+        # P3: class-wise margin driven by unsupervised prediction entropy.
+        logits = np.log(np.clip(probabilities, 1e-8, None))
+        predicted = probabilities.argmax(axis=1)
+        entropy = -(probabilities * np.log(np.clip(probabilities, 1e-8, None))).sum(axis=1)
+        class_entropy = np.array([
+            entropy[predicted == c].mean() if np.any(predicted == c) else 0.0
+            for c in range(num_classes)])
+        centred = class_entropy - class_entropy.mean()
+        scale = max(1e-6, np.abs(centred).max())
+        bias = args.entropy_margin * (centred / scale)
+        adjusted = probabilities * np.exp(bias[None, :])
     prediction = adjusted.argmax(axis=1)
     confusion = np.zeros((num_classes, num_classes), dtype=np.int64)
     for truth, pred in zip(labels, prediction):
         confusion[truth, pred] += 1
     metrics = metrics_from_confusion(confusion)
     metrics["alpha"] = float(args.alpha)
+    metrics["adjust"] = args.adjust
+    metrics["entropy_margin"] = float(args.entropy_margin)
     metrics["target_prior"] = target_prior.tolist()
     payload = {
         "checkpoint": str(path),
