@@ -1338,6 +1338,12 @@ P4 = 源原型高置信过滤（`P4_FILTER=0.98`，训练期）；P2 = 目标先
 
 **结论：Pavia 空间平滑 σ=4.0 稳定有效（3/3 为正，+1.35，AA +1.15）。只对 Pavia 开启；Houston/HyRANK 不变（不受影响）。**
 
+## 10.61 边际匹配（Pavia，有效）+ 数据集级推理配置
+
+- 迭代边际匹配（IPF/Sinkhorn：让预测类别分布逼近 P2 估计的目标先验）：Pavia seed1237 **OA 88.50（+0.14）、AA 87.67（+1.94）**，eta=0.5/iters=20 最优（eta=1.0 为 88.42）。
+- 所有数据集级推理设置已移入 `datasets/*/config.yaml`：`eval_temperature / eval_sliding_radius / eval_spatial_smooth / eval_tent / eval_margin_match / eval_mm_eta / eval_mm_iters`，`final_eval_locked.py` 优先读 config、env 可覆盖；旧 checkpoint 无这些键时回退到默认表。
+- 版本 v7.9-p4p2p10tentsmoothmm。
+
 ## 11. 注意事项与坑（避免后续误用）
 
 1. **跨机器不可比**：所有数字来自黄金实例 `4d004f9f54`（RTX 4090 / 驱动 580.105.08），换实例重训会得到不同权重（同机同 seed 才逐位一致）。
