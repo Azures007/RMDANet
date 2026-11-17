@@ -510,9 +510,17 @@ class PatchDataset(Dataset):
             raise ValueError("patch_size must be odd.")
         self.patch_size = int(patch_size)
         self.radius = self.patch_size // 2
+        self.multiscale_sizes = ()
+        extra_radius = self.radius
+        if os.environ.get("MULTISCALE_PATCH", "").strip() == "1":
+            raw = os.environ.get("MULTISCALE_SIZES", "5,7")
+            self.multiscale_sizes = tuple(int(v) for v in raw.split(",") if v.strip())
+            if self.multiscale_sizes:
+                extra_radius = max(self.radius, max(self.multiscale_sizes) // 2)
+        self.extra_radius = extra_radius
         self.image = np.pad(
             np.asarray(image, dtype=np.float32),
-            ((self.radius, self.radius), (self.radius, self.radius), (0, 0)),
+            ((self.extra_radius, self.extra_radius), (self.extra_radius, self.extra_radius), (0, 0)),
             mode="symmetric",
         )
         self.coordinates = np.asarray(coordinates, dtype=np.int64)
@@ -608,11 +616,21 @@ class PatchDataset(Dataset):
 
     def __getitem__(self, index: int):
         row, col = self.coordinates[index]
-        row += self.radius
-        col += self.radius
-        r0, r1 = row - self.radius, row + self.radius + 1
-        c0, c1 = col - self.radius, col + self.radius + 1
+        row += self.extra_radius
+        col += self.extra_radius
+        size = self.patch_size
+        if self.multiscale_sizes:
+            size = int(np.random.choice(self.multiscale_sizes))
+        half = size // 2
+        r0, r1 = row - half, row + half + 1
+        c0, c1 = col - half, col + half + 1
         patch = np.asarray(self.image[r0:r1, c0:c1], dtype=np.float32)
+        if size != self.patch_size:
+            tensor = torch.from_numpy(patch.transpose(2, 0, 1))
+            tensor = torch.nn.functional.interpolate(
+                tensor.unsqueeze(0), size=(self.patch_size, self.patch_size),
+                mode="bilinear", align_corners=False).squeeze(0)
+            patch = tensor.numpy().transpose(1, 2, 0)
         if self.augment:
             patch = self._augment_patch(patch)
         if os.environ.get("EDGE_ENHANCE", "").strip() == "1":
