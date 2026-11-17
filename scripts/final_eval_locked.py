@@ -159,6 +159,8 @@ def main():
         offsets=[(dy,dx) for dy in range(-sl_radius,sl_radius+1) for dx in range(-sl_radius,sl_radius+1)]
         height,width=aligned.shape[:2]
         prob_sum=None
+        weight_sum=0.0
+        sigma=float(os.environ.get('SLIDING_SIGMA','0'))
         for dy,dx in offsets:
             shifted=coordinates+np.array([dy,dx])
             shifted[:,0]=np.clip(shifted[:,0],0,height-1)
@@ -171,8 +173,11 @@ def main():
                     x=batch[0].to(device,non_blocking=True)
                     offset_probs.append(torch.softmax(model(x).logits.float(),dim=1).cpu())
             offset_mean=torch.cat(offset_probs)
-            prob_sum=offset_mean if prob_sum is None else prob_sum+offset_mean
-        probabilities=(prob_sum/float(len(offsets))).numpy().astype('float64')
+            weight = 1.0 if sigma <= 0.0 else float(np.exp(-(dy * dy + dx * dx) / (2.0 * sigma * sigma)))
+            weight_sum += weight
+            weighted = offset_mean * weight
+            prob_sum = weighted if prob_sum is None else prob_sum + weighted
+        probabilities=(prob_sum/weight_sum).numpy().astype('float64')
         probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE',str(_d_temp))))
         source_prior=np.full(t.num_classes,1.0/t.num_classes)
         p2_iters=int(os.environ.get('P2_EM_ITERS','30'))
