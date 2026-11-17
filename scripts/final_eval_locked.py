@@ -40,9 +40,8 @@ def main():
     # args["bands"] entry may be missing when the front-end changes channels).
     try:
         inferred_bands=int(checkpoint['model']['spectral_encoder.raw_projection.1.weight'].shape[1])
-        if inferred_bands!=int(getattr(t,'bands',inferred_bands)):
-            print(f'[FINAL EVAL] inferred bands={inferred_bands} from checkpoint')
-            t.bands=inferred_bands
+        t.bands=inferred_bands
+        print(f'[FINAL EVAL] inferred bands={inferred_bands} from checkpoint')
     except Exception:
         pass
     device=torch.device(args.device if torch.cuda.is_available() and args.device.startswith('cuda') else 'cpu')
