@@ -132,12 +132,15 @@ def main():
         target_prior=em_target_prior(probabilities,source_prior)
         target_prior=0.5*target_prior+0.5*source_prior
         target_prior=np.clip(target_prior,0.02,None);target_prior=target_prior/target_prior.sum()
+        probabilities=np.asarray(probabilities).reshape(-1,t.num_classes)
+        target_prior=np.asarray(target_prior).reshape(-1)
+        source_prior=np.asarray(source_prior).reshape(-1)
         if os.environ.get("CLASSLWISE_ALPHA","").strip()=="1":
             weak_mask=target_prior < (1.0/t.num_classes)*0.7
-            alpha_vec=np.where(weak_mask,0.8,0.3)
+            alpha_vec=np.where(weak_mask,0.8,0.3).reshape(-1)
         else:
             alpha_vec=np.full(t.num_classes,0.5)
-        adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior))[None,:]
+        adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior)[None,:])
         prediction=adjusted.argmax(axis=1)
         confusion=np.zeros((t.num_classes,t.num_classes),dtype=np.int64)
         for truth,pred in zip(labels_np,prediction):confusion[truth,pred]+=1
@@ -160,12 +163,15 @@ def main():
         target_prior=em_target_prior(probabilities,source_prior)
         target_prior=0.5*target_prior+0.5*source_prior
         target_prior=np.clip(target_prior,0.02,None);target_prior=target_prior/target_prior.sum()
+        probabilities=np.asarray(probabilities).reshape(-1,num_classes)
+        target_prior=np.asarray(target_prior).reshape(-1)
+        source_prior=np.asarray(source_prior).reshape(-1)
         if os.environ.get("CLASSLWISE_ALPHA","").strip()=="1":
             weak_mask=target_prior < (1.0/num_classes)*0.7
-            alpha_vec=np.where(weak_mask,0.8,0.3)
+            alpha_vec=np.where(weak_mask,0.8,0.3).reshape(-1)
         else:
             alpha_vec=np.full(num_classes,0.5)
-        adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior))[None,:]
+        adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior)[None,:])
         prediction=adjusted.argmax(axis=1)
         confusion=np.zeros((num_classes,num_classes),dtype='int64')
         for truth,pred in zip(labels,prediction):confusion[truth,pred]+=1
