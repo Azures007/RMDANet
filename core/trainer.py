@@ -1335,6 +1335,21 @@ def run_epoch(
                             margin = (log_prob[:, left] - log_prob[:, right]).abs()
                             exclude = exclude | (pair_mask & margin.lt(p5_margin))
                         reliability_batch.stable_mask = reliability_batch.stable_mask & (~exclude)
+                # Plan 5: late-phase weak-class secondary rescue (epoch >= start).
+                p5_late_start = int(os.environ.get("P5_LATE_START", "0"))
+                p5_late_quota = int(os.environ.get("P5_LATE_QUOTA", "0"))
+                if (p5_late_start > 0 and p5_late_quota > 0 and epoch >= p5_late_start
+                        and reliability_batch.labels.numel() > 0):
+                    old_quota = memory.pseudo_min_per_class
+                    memory.pseudo_min_per_class = p5_late_quota
+                    try:
+                        thresholds = memory.class_thresholds()[reliability_batch.labels]
+                        reliability_batch.stable_mask = memory._min_class_quota_mask(
+                            reliability_batch.labels, reliability_batch.reliability,
+                            reliability_batch.confidence, reliability_batch.margin,
+                            thresholds, reliability_batch.stable_mask, target_ids)
+                    finally:
+                        memory.pseudo_min_per_class = old_quota
             else:
                 fallback_probability = F.softmax(source_output.logits.detach().float(), dim=1)
                 reliability_batch = memory.empty_batch(
@@ -1581,7 +1596,7 @@ def effective_config_snapshot(args: argparse.Namespace) -> dict[str, Any]:
                         "PSEUDO_MODE_OVERRIDE", "NORMALIZE_MODE_OVERRIDE", "AMPLITUDE_OVERRIDE",
                         "STAGE2_GATING", "STAGE2_WARMUP", "STAGE2_BETA",
                         "PATCH_SIZE_OVERRIDE", "OPEN_SET_OT", "OPEN_SET_FRAC", "OPEN_SET_TAU",
-                        "P5_PAIRS", "P5_MARGIN", "TEACHER_SOFT_DECAY")
+                        "P5_PAIRS", "P5_MARGIN", "TEACHER_SOFT_DECAY", "P5_LATE_START", "P5_LATE_QUOTA")
         },
     }
     return snapshot
