@@ -219,7 +219,21 @@ def main():
         else:
             alpha_vec=np.full(t.num_classes,p2_alpha)
         adjusted=probabilities*np.exp(alpha_vec[None,:]*np.log(target_prior/source_prior)[None,:])
-        prediction=adjusted.argmax(axis=1)
+        if os.environ.get("MARGIN_MATCH", "").strip() == "1":
+            eta = float(os.environ.get("MM_ETA", "0.5"))
+            iters = int(os.environ.get("MM_ITERS", "20"))
+            logp = np.log(np.clip(adjusted, 1e-12, None))
+            bias = np.zeros(t.num_classes)
+            for _ in range(iters):
+                logits_iter = logp + bias[None, :]
+                logits_iter = logits_iter - logits_iter.max(axis=1, keepdims=True)
+                prob_iter = np.exp(logits_iter)
+                prob_iter = prob_iter / prob_iter.sum(axis=1, keepdims=True)
+                marginal = prob_iter.mean(axis=0)
+                bias = bias + eta * (np.log(target_prior) - np.log(np.clip(marginal, 1e-8, None)))
+            prediction = (logp + bias[None, :]).argmax(axis=1)
+        else:
+            prediction=adjusted.argmax(axis=1)
         confusion=np.zeros((t.num_classes,t.num_classes),dtype=np.int64)
         for truth,pred in zip(labels_np,prediction):confusion[truth,pred]+=1
         metrics=metrics_from_confusion(confusion)
