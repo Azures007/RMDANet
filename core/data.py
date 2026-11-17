@@ -556,6 +556,22 @@ class PatchDataset(Dataset):
         return ((horizontal[:, :-2] + 2.0 * horizontal[:, 1:-1] + horizontal[:, 2:]) * 0.25).astype(np.float32)
 
     @staticmethod
+    def _lowfreq_boost(patch: np.ndarray, low_k: int = 3, boost: float = 1.5) -> np.ndarray:
+        """P6: amplify low-frequency (global structure) coefficients only."""
+        spectrum = np.fft.fft2(patch, axes=(0, 1))
+        shifted = np.fft.fftshift(spectrum, axes=(0, 1))
+        height, width = patch.shape[0], patch.shape[1]
+        cy, cx = height // 2, width // 2
+        low = max(1, int(low_k))
+        y0, y1 = max(0, cy - low), min(height, cy + low + 1)
+        x0, x1 = max(0, cx - low), min(width, cx + low + 1)
+        boosted = shifted.copy()
+        boosted[y0:y1, x0:x1, :] = boosted[y0:y1, x0:x1, :] * float(boost)
+        restored = np.fft.ifftshift(boosted, axes=(0, 1))
+        out = np.real(np.fft.ifft2(restored, axes=(0, 1))).astype(np.float32)
+        return np.clip(out, patch.min(), patch.max())
+
+    @staticmethod
     def _frequency_augment(patch: np.ndarray) -> np.ndarray:
         """Fourier-domain perturbation for cross-scene robustness.
         
@@ -603,6 +619,14 @@ class PatchDataset(Dataset):
             patch = self._edge_enhance(patch, float(os.environ.get("EDGE_GAIN", "0.3")))
         patch = _apply_spectral_pca(patch)
         patch = _apply_pretrained_features(patch)
+        p6_boost = float(os.environ.get("P6_BOOST", "0"))
+        if p6_boost > 0.0 and self.labels is not None:
+            classes_env = os.environ.get("P6_CLASSES", "").strip()
+            weak = {int(x) for x in classes_env.split(",") if x.strip()}
+            label_now = int(self.labels[index]) if index < len(self.labels) else -1
+            if weak and label_now in weak and np.random.random() < float(os.environ.get("P6_PROB", "0.4")):
+                patch = self._lowfreq_boost(
+                    patch, low_k=int(os.environ.get("P6_LOWK", "3")), boost=p6_boost)
         if os.environ.get("FREQ_DUAL", "").strip() == "1":
             low = self._blur_patch(patch)
             high = patch - low
