@@ -102,17 +102,20 @@ def main():
         labels_np=labels_at_coordinates(gt,coordinates)-1
         offsets=[(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
         height,width=aligned.shape[:2]
-        prob_sum=torch.zeros(len(coordinates),t.num_classes)
+        prob_sum=None
         for dy,dx in offsets:
             shifted=coordinates+np.array([dy,dx])
             shifted[:,0]=np.clip(shifted[:,0],0,height-1)
             shifted[:,1]=np.clip(shifted[:,1],0,width-1)
             dataset=PatchDataset(aligned,shifted,patch_size=t.patch_size,labels=labels_np,augment=False)
             loader_p10=torch.utils.data.DataLoader(dataset,batch_size=128,shuffle=False)
+            offset_probs=[]
             with torch.no_grad():
                 for batch in loader_p10:
                     x=batch[0].to(device,non_blocking=True)
-                    prob_sum+=torch.softmax(model(x).logits.float(),dim=1).cpu()
+                    offset_probs.append(torch.softmax(model(x).logits.float(),dim=1).cpu())
+            offset_mean=torch.cat(offset_probs)
+            prob_sum=offset_mean if prob_sum is None else prob_sum+offset_mean
         probabilities=(prob_sum/float(len(offsets))).numpy().astype('float64')
         source_prior=np.full(t.num_classes,1.0/t.num_classes)
         target_prior=em_target_prior(probabilities,source_prior)
