@@ -59,7 +59,7 @@ def main():
     has_spectral_branch = any(
         str(k).startswith(("spectral_encoder.", "spectral_fusion.")) for k in checkpoint["model"].keys()
     )
-    model=DualReliabilityEncoder(bands=src.image.shape[-1],num_classes=t.num_classes,
+    model=DualReliabilityEncoder(bands=int(getattr(t,'bands',src.image.shape[-1])),num_classes=t.num_classes,
        projection_dim=t.projection_dim,projection_norm=t.projection_norm,
        aspp_mode=t.aspp_mode,pooling_mode=t.pooling_mode,
        spectral_fusion_mode=t.spectral_fusion_mode,amplitude_channel=t.amplitude_channel,
