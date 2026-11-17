@@ -110,7 +110,10 @@ def main():
         valid=(gt>0)&(np.linalg.norm(aligned,axis=-1)>0)
         coordinates=coordinates_from_mask(valid)
         labels_np=labels_at_coordinates(gt,coordinates)-1
-        sl_radius=int(os.environ.get('SLIDING_RADIUS','1'))
+        slab=dict(pavia=(2,1.0),houston=(2,1.5),hyrank=(1,1.5))
+        _key=str(getattr(t,'dataset','') or '').lower()
+        _d_radius,_d_temp=slab.get(_key,(1,1.0))
+        sl_radius=int(os.environ.get('SLIDING_RADIUS',str(_d_radius)))
         offsets=[(dy,dx) for dy in range(-sl_radius,sl_radius+1) for dx in range(-sl_radius,sl_radius+1)]
         height,width=aligned.shape[:2]
         prob_sum=None
@@ -128,7 +131,7 @@ def main():
             offset_mean=torch.cat(offset_probs)
             prob_sum=offset_mean if prob_sum is None else prob_sum+offset_mean
         probabilities=(prob_sum/float(len(offsets))).numpy().astype('float64')
-        probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE','1.0')))
+        probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE',str(_d_temp))))
         source_prior=np.full(t.num_classes,1.0/t.num_classes)
         p2_iters=int(os.environ.get('P2_EM_ITERS','30'))
         p2_smooth=float(os.environ.get('P2_SMOOTH','0.5'))
@@ -161,7 +164,10 @@ def main():
                 probabilities_list.append(predict_probabilities(model,x,use_tta=t.final_tta).float().cpu())
                 label_list.append(batch[1].cpu())
         probabilities=torch.cat(probabilities_list).numpy().astype('float64')
-        probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE','1.0')))
+        _slab2=dict(pavia=(2,1.0),houston=(2,1.5),hyrank=(1,1.5))
+        _k2=str(getattr(t,'dataset','') or '').lower()
+        _d_temp2=_slab2.get(_k2,(1,1.0))[1]
+        probabilities=apply_temperature(probabilities, float(os.environ.get('EVAL_TEMPERATURE',str(_d_temp2))))
         labels=torch.cat(label_list).numpy().astype('int64')
         num_classes=t.num_classes
         source_prior=np.full(num_classes,1.0/num_classes,dtype='float64')

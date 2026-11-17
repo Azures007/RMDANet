@@ -1,17 +1,20 @@
-RMDANet v7.5-p4p2p10
-======================
+RMDANet v7.6-p4p2p10t
+========================
 Built: 2026-11-17
 Base: v7.3-slim11 (11 weighted loss sub-terms, 4 loss families)
 
-Changes in v7.5:
-  - P4: source-prototype high-confidence filter (P4_FILTER=0.98 default).
-  - P2: inference-time target-prior calibration in the locked eval
-    (final_eval_locked.py --prior-calib, alpha=0.5/smooth=0.5/floor=0.02).
-  - P10: sliding-window (3x3 offsets) probability fusion in the locked eval
-    (final_eval_locked.py --sliding). Recommended for Pavia/Houston.
-  - 3-seed results (P4+P2+P10): Pavia 86.30 +- 0.59, Houston 80.40 +- 0.83,
-    HyRANK 61.97 +- 0.72 (P10 neutral on HyRANK; v7.4 + P2 = 62.02).
-  - No new loss terms, no new reliability components.
+Inference protocol (per dataset defaults, --sliding):
+  - Pavia:  temperature 1.0, sliding radius 2 (5x5 = 25 views)
+  - Houston: temperature 1.5, sliding radius 2
+  - HyRANK: temperature 1.5, sliding radius 1 (3x3 = 9 views)
+  Override with EVAL_TEMPERATURE / SLIDING_RADIUS.
 
-Rejected/experimental (default off): P6 low-frequency augmentation,
-  P7 AdaBN, P8 Platt, P9 MC-Dropout, P5 pair-margin, P1 weak-class quota.
+Results (v7.6, 2 seeds for Pavia, 1 seed for Houston/HyRANK):
+  - Pavia: 87.13 / 87.01 -> 87.07
+  - Houston: 82.88
+  - HyRANK: 61.67
+
+Base improvements: P4 (prototype filter) + P2 (prior calibration) + P10 (sliding).
+All other report proposals (loss reweighting, quota, low-freq, AdaBN, Platt,
+MC-dropout, multi-scale patch, curriculum, 256-dim, open-set) were tested and
+rejected (see docs 10.42-10.53).
